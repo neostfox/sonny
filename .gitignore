@@ -1,0 +1,39 @@
+# Trellis runtime
+.developer
+.current-task
+.runtime/
+.ralph-state.json
+.agents/
+.agent-log
+.session-id
+.plan-log
+*.tmp
+.backup-*
+*.new
+
+# Python
+**/__pycache__/
+**/*.pyc
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Models (downloaded at runtime)
+.memory-runtime/
+
+# SQLite databases (generated at runtime)
+*.db
+*.db-wal
+*.db-shm

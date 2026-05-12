@@ -32,17 +32,19 @@
 
 **Context**: Need semantic similarity for grouping observations and retrieving concepts.
 
-**Decision**: Use `BAAI/bge-small-zh-v1.5` (512-dim, ~90MB, CPU-friendly) for:
+**Decision**: Use `BAAI/bge-small-zh-v1.5` (512-dim, ~90MB, CPU-friendly, Candle-compatible BERT architecture) via `candle-transformers` for:
 - Clustering observations into concept candidates (offline)
 - Semantic recall matching queries to concepts (realtime)
 
 Vectors do NOT replace LLM extraction. They complement it: LLM does understanding, embeddings do speed and scale.
 
+**Candle compatibility**: bge-small-zh-v1.5 is a standard BERT model. Candle's `bert` example loads it directly via `--model-id BAAI/bge-small-zh-v1.5`. No ONNX Runtime or Python runtime needed.
+
 ### Decision: Beta-Bernoulli for Confidence Management
 
 **Context**: Need a principled way to update confidence based on accumulated evidence.
 
-**Decision**: Each concept/observation maintains Beta(alpha, beta) prior. Confidence = alpha / (alpha + beta). Pure Python, zero dependencies, interpretable, sequential updates.
+**Decision**: Each concept/observation maintains Beta(alpha, beta) prior. Confidence = alpha / (alpha + beta). Pure Rust, zero external dependencies, interpretable, sequential updates.
 
 ### Decision: Consolidation Engine (Hippocampus Replay)
 
@@ -50,11 +52,19 @@ Vectors do NOT replace LLM extraction. They complement it: LLM does understandin
 
 **Decision**: A dedicated Consolidation Engine runs offline, performing cross-session validation, frequency counting, conflict detection, and automatic promotion/demotion without human intervention.
 
-### Decision: Python Core + TS Hooks
+### Decision: Rust Core + TS Hooks
 
-**Context**: Need ML ecosystem (sentence-transformers, sklearn) and Claude Code hook integration.
+**Context**: Need ML capabilities (embeddings, clustering, Bayesian inference) and Claude Code hook integration.
 
-**Decision**: Core engine in Python. Claude Code hooks in TS/Shell calling Python CLI (`memory prehook` / `memory posthook`).
+**Decision**: Core engine in Rust. Claude Code hooks in TS/Shell calling compiled Rust binary (`memory prehook` / `memory posthook`).
+
+**Why Rust over Python**:
+- Single static binary, no virtualenv/PATH/cold-start issues
+- Candle provides native Rust ML (embeddings, model inference)
+- linfa provides clustering (equivalent to sklearn)
+- ndarray provides vector math (equivalent to numpy)
+- rusqlite provides SQLite access
+- Zero runtime dependency on Python environment
 
 ### Decision: Neuroscience-Inspired Mechanisms
 
@@ -96,6 +106,23 @@ Six mechanisms from neuroscience research are incorporated. **These are not opti
 **Context**: Hand-crafted spreading activation rules work well at small scale (<500 concepts) but cannot learn optimal message-passing patterns.
 
 **Decision**: When concept count ≥ 500 AND graph density ≥ 0.05, automatically activate GraphSAGE training in the background. GNN results initially run in parallel with hand-crafted rules (advisory mode), then gradually take over as they prove reliable. This is a scale feature, not an MVP feature.
+
+### Decision: LLM Call Merging
+
+**Context**: Multiple pipeline steps need LLM inference (extraction, intent classification, concept naming, Memory Context generation). Each independent call adds latency and cost.
+
+**Decision**: When two LLM-dependent steps naturally share context, merge them into a single call. Output structured JSON with multiple fields instead of making sequential calls.
+
+**Why**: LLM calls are the dominant cost and latency driver. Merging reduces:
+- Latency: 1 call instead of 2
+- Cost: shared prompt prefix amortized across merged tasks
+- Context: merged steps have richer mutual context than isolated calls
+
+**Example**: Intent classification merged into Memory Context generation — the same LLM call that produces the context also classifies the intent, since it already has the full query + concept data.
+
+**Constraint**: Only merge steps with compatible latency requirements. Never merge offline steps (extraction, consolidation) with realtime steps (recall, context generation).
+
+**Anti-pattern**: Making a separate LLM call for each classification/extraction step when they could share a single invocation.
 
 ## Anti-patterns
 

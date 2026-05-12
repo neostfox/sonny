@@ -12,15 +12,18 @@ Recall is NOT "find similar text". Recall is:
 
 Embed the user query and search for nearest concept/concept_candidate vectors.
 
-```python
-def semantic_recall(query: str, workspace_id: str, top_k: int = 10) -> list[tuple[str, float]]:
-    """
-    Embed query, search vec_embedding for nearest concepts.
-    Returns [(concept_id, similarity_score)].
-    """
-    query_embedding = embed(query)
-    results = vector_search(query_embedding, workspace_id, top_k=top_k)
-    return [(r.source_id, r.distance) for r in results]
+```rust
+fn semantic_recall(
+    query: &str,
+    workspace_id: &str,
+    top_k: usize,
+) -> Result<Vec<(String, f32)>, MemoryError> {
+    // Embed query, search vec_embedding for nearest concepts.
+    // Returns Vec<(concept_id, similarity_score)>.
+    let query_embedding = embed(query)?;
+    let results = vector_search(&query_embedding, workspace_id, top_k)?;
+    Ok(results.iter().map(|r| (r.source_id.clone(), r.distance)).collect())
+}
 ```
 
 **Weight**: 60% of final score.
@@ -29,117 +32,147 @@ def semantic_recall(query: str, workspace_id: str, top_k: int = 10) -> list[tupl
 
 Extract entities from the query using lightweight LLM call, then match against concept entity lists.
 
-```python
-def entity_recall(query: str, workspace_id: str) -> list[tuple[str, float]]:
-    """
-    Extract entities from query, match against concept.related_entities.
-    Returns [(concept_id, overlap_ratio)].
-    """
-    query_entities = llm_extract_entities(query)
-    concepts = get_concepts_by_entities(query_entities, workspace_id)
-    results = []
-    for concept in concepts:
-        overlap = len(concept.entities & set(query_entities)) / len(concept.entities)
-        results.append((concept.id, overlap))
-    return results
+```rust
+fn entity_recall(
+    query: &str,
+    workspace_id: &str,
+) -> Result<Vec<(String, f32)>, MemoryError> {
+    // Extract entities from query, match against concept.related_entities.
+    // Returns Vec<(concept_id, overlap_ratio)>.
+    let query_entities = llm_extract_entities(query)?;
+    let concepts = get_concepts_by_entities(&query_entities, workspace_id)?;
+    let mut results = Vec::new();
+    for concept in &concepts {
+        let overlap = concept.entities.intersection(&query_entities).count() as f32
+            / concept.entities.len() as f32;
+        results.push((concept.id.clone(), overlap));
+    }
+    Ok(results)
+}
 ```
 
 **Weight**: 40% of final score.
 
 ### Merged Score
 
-```python
-def recall(query: str, workspace_id: str, top_n: int = 5) -> list[tuple[str, float]]:
-    """
-    Dual-channel recall with merged scoring.
-    """
-    semantic_results = semantic_recall(query, workspace_id, top_k=10)
-    entity_results = entity_recall(query, workspace_id)
+```rust
+fn recall(
+    query: &str,
+    workspace_id: &str,
+    top_n: usize,
+) -> Result<Vec<(String, f32)>, MemoryError> {
+    // Dual-channel recall with merged scoring.
+    let semantic_results = semantic_recall(query, workspace_id, 10)?;
+    let entity_results = entity_recall(query, workspace_id)?;
 
-    scores = {}
-    for cid, sim in semantic_results:
-        scores[cid] = scores.get(cid, 0) + sim * 0.6
-    for cid, overlap in entity_results:
-        scores[cid] = scores.get(cid, 0) + overlap * 0.4
+    let mut scores: HashMap<String, f32> = HashMap::new();
+    for (cid, sim) in &semantic_results {
+        *scores.entry(cid.clone()).or_insert(0.0) += sim * 0.6;
+    }
+    for (cid, overlap) in &entity_results {
+        *scores.entry(cid.clone()).or_insert(0.0) += overlap * 0.4;
+    }
 
-    return sorted(scores.items(), key=lambda x: -x[1])[:top_n]
+    let mut ranked: Vec<_> = scores.into_iter().collect();
+    ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+    Ok(ranked.into_iter().take(top_n).collect())
+}
 ```
 
 ## Spreading Activation
 
 When a concept is activated, partially activate related concepts through the concept network.
 
-```python
-def spread_activation(
-    seed_concept_id: str,
-    concept_network: Graph,
-    max_depth: int = 2,
-    decay_rate: float = 0.5
-) -> dict[str, float]:
-    """
-    Spread activation from seed concept through network.
-    Returns {concept_id: activation_strength}.
-    """
-    activation = {seed_concept_id: 1.0}
-    frontier = {seed_concept_id}
+```rust
+fn spread_activation(
+    seed_concept_id: &str,
+    concept_network: &ConceptGraph,
+    max_depth: usize,
+    decay_rate: f32,
+) -> HashMap<String, f32> {
+    // Spread activation from seed concept through network.
+    // Returns {concept_id: activation_strength}.
+    let mut activation: HashMap<String, f32> = HashMap::new();
+    activation.insert(seed_concept_id.to_string(), 1.0);
+    let mut frontier: HashSet<String> = [seed_concept_id.to_string()].into_iter().collect();
 
-    for depth in range(max_depth):
-        next_frontier = set()
-        for concept_id in frontier:
-            current = activation[concept_id]
-            if current < 0.05:
-                continue
-            for neighbor_id, edge_strength in concept_network.neighbors(concept_id):
-                spread = current * edge_strength * decay_rate
-                activation[neighbor_id] = max(activation.get(neighbor_id, 0), spread)
-                if spread > 0.05:
-                    next_frontier.add(neighbor_id)
-        frontier = next_frontier
+    for _ in 0..max_depth {
+        let mut next_frontier: HashSet<String> = HashSet::new();
+        for concept_id in &frontier {
+            let current = *activation.get(concept_id).unwrap_or(&0.0);
+            if current < 0.05 { continue; }
+            for (neighbor_id, edge_strength) in concept_network.neighbors(concept_id) {
+                let spread = current * edge_strength * decay_rate;
+                let entry = activation.entry(neighbor_id.clone()).or_insert(0.0);
+                *entry = (*entry).max(spread);
+                if spread > 0.05 {
+                    next_frontier.insert(neighbor_id);
+                }
+            }
+        }
+        frontier = next_frontier;
+    }
 
-    return activation
+    activation
+}
 ```
 
 ### Enhanced Recall with Spreading
 
-```python
-def recall_with_spreading(query: str, workspace_id: str) -> MemoryContext:
-    """
-    Full recall: direct match + spreading activation.
-    """
-    # 1. Direct matches (dual-channel)
-    direct = recall(query, workspace_id, top_n=3)
+```rust
+fn recall_with_spreading(
+    query: &str,
+    workspace_id: &str,
+) -> Result<MemoryContext, MemoryError> {
+    // Full recall: direct match + spreading activation.
+    // 1. Direct matches (dual-channel)
+    let direct = recall(query, workspace_id, 3)?;
 
-    # 2. Spread from each direct match
-    all_activations = {}
-    for concept_id, score in direct:
-        activations = spread_activation(concept_id, get_network(workspace_id))
-        for aid, strength in activations.items():
-            combined = score if aid == concept_id else strength * score
-            all_activations[aid] = max(all_activations.get(aid, 0), combined)
+    // 2. Spread from each direct match
+    let mut all_activations: HashMap<String, f32> = HashMap::new();
+    let network = get_network(workspace_id)?;
+    for (concept_id, score) in &direct {
+        let activations = spread_activation(concept_id, &network, 2, 0.5);
+        for (aid, strength) in &activations {
+            let combined = if aid == concept_id { *score } else { strength * score };
+            let entry = all_activations.entry(aid.clone()).or_insert(0.0);
+            *entry = (*entry).max(combined);
+        }
+    }
 
-    # 3. Rank and select
-    ranked = sorted(all_activations.items(), key=lambda x: -x[1])[:5]
-    return build_context(ranked, workspace_id)
+    // 3. Rank and select
+    let mut ranked: Vec<_> = all_activations.into_iter().collect();
+    ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+    let top5: Vec<_> = ranked.into_iter().take(5).collect();
+    build_context(&top5, workspace_id)
+}
 ```
 
 ## Intent Classification
 
 Before recall, classify user intent to determine recall strategy.
 
-```python
-INTENT_TEMPLATES = {
-    'continue_investigation': ['继续看', '接着查', '还差', '接下来'],
-    'verify_fact':            ['确认', '是不是', '有没有'],
-    'correct_mistake':        ['不对', '错了', '不是这个', '其实是'],
-    'add_knowledge':          ['补充', '还有', '另外', '加上'],
-    'review_history':         ['之前', '上次', '历史', '原来'],
-}
+### Phase 3 (MVP): Keyword Matching `[MVP]`
 
-def classify_intent(query: str) -> str:
-    for intent, keywords in INTENT_TEMPLATES.items():
-        if any(kw in query for kw in keywords):
-            return intent
-    return 'general_query'
+硬编码关键词匹配，覆盖 5 种核心意图。足以验证 pipeline 端到端，但覆盖率有限（无法处理中英混合变体表达、新增意图需改代码重新编译）。
+
+```rust
+const INTENT_TEMPLATES: &[(&str, &[&str])] = &[
+    ("continue_investigation", &["继续看", "接着查", "还差", "接下来"]),
+    ("verify_fact",            &["确认", "是不是", "有没有"]),
+    ("correct_mistake",        &["不对", "错了", "不是这个", "其实是"]),
+    ("add_knowledge",          &["补充", "还有", "另外", "加上"]),
+    ("review_history",         &["之前", "上次", "历史", "原来"]),
+];
+
+fn classify_intent(query: &str) -> &str {
+    for (intent, keywords) in INTENT_TEMPLATES {
+        if keywords.iter().any(|kw| query.contains(kw)) {
+            return intent;
+        }
+    }
+    "general_query"
+}
 ```
 
 ### Intent-driven Recall Priority
@@ -153,21 +186,33 @@ def classify_intent(query: str) -> str:
 | `review_history` | concept summary + all facts | Full concept dump |
 | `general_query` | ranked by activation score | Standard recall |
 
+### Phase 7 (Enhancement): LLM Intent Classification `[Enhancement]`
+
+用 LLM 替代硬编码关键词分类意图。**不做独立调用**——合并到 Memory Context 生成步骤中，由同一个 LLM 调用同时输出意图标注 + Memory Context。零额外延迟和成本。
+
+**升级理由**：
+- 硬编码关键词无法覆盖中英混合自然表达（如 "let me check 这个上次排查到哪了"）
+- 新增意图无需改代码，LLM 自然泛化
+- 已有 LLM 调用（Memory Context 生成），合并后零边际成本
+
+**实现方式**：在 Memory Context 生成的 system prompt 中加入意图分类指令，LLM 输出结构化 JSON 包含 `intent` 字段和 `memory_context` 字段。
+
+**激活阈值**：Phase 7，与高级召回机制（spreading activation、sparse activation、contextual priming）一同引入。
+
 ## Memory Context Generation
 
 ### Signature
 
-```python
-def build_context(
-    ranked_concepts: list[tuple[str, float]],
-    workspace_id: str,
-    intent: str = 'general_query',
-    max_tokens: int = 1500
-) -> MemoryContext:
-    """
-    Build Memory Context from ranked concepts.
-    Budget: concept(300) + facts(400) + rejected(250) + prefs(200) + task(250) + evidence(100)
-    """
+```rust
+fn build_context(
+    ranked_concepts: &[(String, f32)],
+    workspace_id: &str,
+    intent: &str,
+    max_tokens: usize,
+) -> Result<MemoryContext, MemoryError> {
+    // Build Memory Context from ranked concepts.
+    // Budget: concept(300) + facts(400) + rejected(250) + prefs(200) + task(250) + evidence(100)
+}
 ```
 
 ### Output Format
@@ -254,101 +299,128 @@ Inject into Claude Code
 
 Pre-activate concepts from recent conversation context before formal recall.
 
-```python
-class ContextualPrimer:
-    """
-    Neuroscience: prior exposure to a stimulus facilitates subsequent processing.
-    Recent conversation context pre-activates related concepts.
-    """
+```rust
+struct ContextualPrimer;
 
-    def prime(self, recent_messages: list[str], workspace_id: str) -> dict[str, float]:
-        """
-        Extract context from last 3-5 messages, weakly activate related concepts.
-        Does NOT produce Memory Context — only updates activation baseline.
-        """
-        context_text = " ".join(recent_messages[-5:])
-        context_embedding = embed(context_text)
+impl ContextualPrimer {
+    /// Neuroscience: prior exposure to a stimulus facilitates subsequent processing.
+    /// Recent conversation context pre-activates related concepts.
 
-        # Weak threshold (0.4) — broader than recall's matching threshold
-        weak_matches = vector_search(context_embedding, workspace_id, threshold=0.4)
+    fn prime(
+        &self,
+        recent_messages: &[String],
+        workspace_id: &str,
+    ) -> Result<HashMap<String, f32>, MemoryError> {
+        // Extract context from last 3-5 messages, weakly activate related concepts.
+        // Does NOT produce Memory Context — only updates activation baseline.
+        let context: String = recent_messages.iter().rev().take(5).cloned()
+            .collect::<Vec<_>>().join(" ");
+        let context_embedding = embed(&context)?;
 
-        priming_map = {}
-        for concept_id, similarity in weak_matches:
-            priming_map[concept_id] = similarity * 0.2  # weak activation
-        return priming_map
+        // Weak threshold (0.4) — broader than recall's matching threshold
+        let weak_matches = vector_search(&context_embedding, workspace_id, 0.4)?;
 
-    def recall_with_priming(self, query, recent_messages, workspace_id):
-        priming = self.prime(recent_messages, workspace_id)
-        direct = recall(query, workspace_id, top_n=5)
+        let priming_map: HashMap<String, f32> = weak_matches.iter()
+            .map(|(cid, sim)| (cid.clone(), sim * 0.2))
+            .collect();
+        Ok(priming_map)
+    }
 
-        # Primed concepts get 20% bonus
-        final_scores = {}
-        for cid, score in direct:
-            final_scores[cid] = score
-            if cid in priming:
-                final_scores[cid] += priming[cid]
-        return sorted(final_scores.items(), key=lambda x: -x[1])
+    fn recall_with_priming(
+        &self,
+        query: &str,
+        recent_messages: &[String],
+        workspace_id: &str,
+    ) -> Result<Vec<(String, f32)>, MemoryError> {
+        let priming = self.prime(recent_messages, workspace_id)?;
+        let direct = recall(query, workspace_id, 5)?;
+
+        // Primed concepts get 20% bonus
+        let mut final_scores: HashMap<String, f32> = HashMap::new();
+        for (cid, score) in &direct {
+            let bonus = priming.get(cid).unwrap_or(&0.0);
+            final_scores.insert(cid.clone(), score + bonus);
+        }
+
+        let mut ranked: Vec<_> = final_scores.into_iter().collect();
+        ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        Ok(ranked)
+    }
+}
 ```
 
 ## Sparse Activation
 
 After spreading activation, suppress all but the top concepts. Brain analogy: only ~2% of neurons fire at any time.
 
-```python
-def sparse_activation(
-    activation_map: dict[str, float],
-    sparsity: float = 0.05,
-    concept_network: Graph = None
-) -> dict[str, float]:
-    """
-    Keep only top-K% activated concepts. Suppress the rest.
-    Competitive inhibition: strong activations suppress weaker neighbors.
-    """
-    sorted_acts = sorted(activation_map.items(), key=lambda x: -x[1])
-    keep_count = max(1, int(len(sorted_acts) * sparsity))
+```rust
+fn sparse_activation(
+    activation_map: &mut HashMap<String, f32>,
+    sparsity: f32,
+    concept_network: Option<&ConceptGraph>,
+) -> HashMap<String, f32> {
+    // Keep only top-K% activated concepts. Suppress the rest.
+    // Competitive inhibition: strong activations suppress weaker neighbors.
+    let mut sorted: Vec<_> = activation_map.iter().collect();
+    sorted.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap());
+    let keep_count = (sorted.len() as f32 * sparsity).max(1.0) as usize;
 
-    active = dict(sorted_acts[:keep_count])
+    let active: HashMap<String, f32> = sorted.iter()
+        .take(keep_count)
+        .map(|(k, v)| ((*k).clone(), *v))
+        .collect();
 
-    # Competitive inhibition
-    if concept_network:
-        for concept_id, strength in active.items():
-            for neighbor_id, edge_strength in concept_network.neighbors(concept_id):
-                if neighbor_id in activation_map and neighbor_id not in active:
-                    activation_map[neighbor_id] *= (1 - edge_strength * 0.3)
+    // Competitive inhibition
+    if let Some(network) = concept_network {
+        for (concept_id, _) in &active {
+            for (neighbor_id, edge_strength) in network.neighbors(concept_id) {
+                if !active.contains_key(neighbor_id) && activation_map.contains_key(neighbor_id) {
+                    let entry = activation_map.get_mut(neighbor_id).unwrap();
+                    *entry *= 1.0 - edge_strength * 0.3;
+                }
+            }
+        }
+    }
 
-    return active
+    active
+}
 ```
 
 ## Hierarchy Expansion (Chunking)
 
 When a concept is matched, expand to children and parent for zoom-in/zoom-out context.
 
-```python
-def recall_with_hierarchy(
-    direct_matches: list[tuple[str, float]],
-    workspace_id: str
-) -> list[tuple[str, float]]:
-    """
-    Expand matched concepts along hierarchy:
-    - Children get 50% of parent's score (zoom in)
-    - Parent gets 30% of child's score (zoom out)
-    """
-    expanded = list(direct_matches)
-    concept_ids = {cid for cid, _ in direct_matches}
+```rust
+fn recall_with_hierarchy(
+    direct_matches: &[(String, f32)],
+    workspace_id: &str,
+) -> Result<Vec<(String, f32)>, MemoryError> {
+    // Expand matched concepts along hierarchy:
+    // - Children get 50% of parent's score (zoom in)
+    // - Parent gets 30% of child's score (zoom out)
+    let mut expanded: Vec<(String, f32)> = direct_matches.to_vec();
+    let concept_ids: HashSet<&str> = direct_matches.iter().map(|(cid, _)| cid.as_str()).collect();
 
-    for concept_id, score in direct_matches:
-        # Expand children (more specific)
-        children = get_children(concept_id, workspace_id)
-        for child in children:
-            if child.id not in concept_ids:
-                expanded.append((child.id, score * 0.5))
+    for (concept_id, score) in direct_matches {
+        // Expand children (more specific)
+        let children = get_children(concept_id, workspace_id)?;
+        for child in children {
+            if !concept_ids.contains(child.id.as_str()) {
+                expanded.push((child.id.clone(), score * 0.5));
+            }
+        }
 
-        # Expand parent (more abstract)
-        parent = get_parent(concept_id, workspace_id)
-        if parent and parent.id not in concept_ids:
-            expanded.append((parent.id, score * 0.3))
+        // Expand parent (more abstract)
+        if let Some(parent) = get_parent(concept_id, workspace_id)? {
+            if !concept_ids.contains(parent.id.as_str()) {
+                expanded.push((parent.id.clone(), score * 0.3));
+            }
+        }
+    }
 
-    return sorted(expanded, key=lambda x: -x[1])
+    expanded.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+    Ok(expanded)
+}
 ```
 
 ## Post-Recall Tracking

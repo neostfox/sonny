@@ -48,4 +48,13 @@ Spec documents for the Memory Runtime system — a concept-growth-based long-ter
 ## Related Documents
 
 - [Technical Design Document](../../docs/memory-runtime-design.md) — Full system design (original source)
-- [Implementation Plan](file:///home/shaobolua/.claude/plans/mvp-ner-goofy-kitten.md) — Phased implementation plan
+- [Implementation Plan](file:///home/shaobolua/.claude/plans/mvp-ner-goofy-kitten.md) — Phased implementation plan (Rust)
+
+## Tech Stack
+
+- **Language**: Rust (core engine) + TypeScript (Claude Code hooks)
+- **Embedding**: `BAAI/bge-small-zh-v1.5` via `candle-transformers` (512-dim, ~90MB, Chinese-optimized)
+- **Clustering**: `linfa-clustering` (HAC)
+- **Storage**: `rusqlite` (SQLite + optional sqlite-vec)
+- **CLI**: `clap`
+- **Async**: `tokio`

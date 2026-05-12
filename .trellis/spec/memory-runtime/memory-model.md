@@ -161,12 +161,12 @@ CREATE TABLE embedding_blob (
     source_id       TEXT NOT NULL,
     workspace_id    TEXT,
     text_content    TEXT,
-    vector_blob     BLOB NOT NULL,  -- numpy float32 array.tobytes(), 512 * 4 = 2048 bytes
+    vector_blob     BLOB NOT NULL,  -- ndarray Array1<f32> as raw bytes, 512 * 4 = 2048 bytes
     created_at      TEXT
 );
 ```
 
-Startup: try loading sqlite-vec extension. If failure → log warning, use embedding_blob with numpy cosine similarity.
+Startup: try loading sqlite-vec extension. If failure → log warning, use embedding_blob with ndarray cosine similarity.
 
 ## Hippocampal Buffer (Complementary Learning)
 

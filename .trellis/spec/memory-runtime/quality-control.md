@@ -39,25 +39,35 @@ Every observation, memory item, concept candidate, and concept maintains a Beta(
 
 ### Implementation
 
-```python
-class BetaConfidence:
-    def __init__(self, alpha: float = 1.0, beta: float = 1.0):
-        self.alpha = alpha
-        self.beta = beta
+```rust
+struct BetaConfidence {
+    alpha: f32,
+    beta: f32,
+}
 
-    @property
-    def confidence(self) -> float:
-        return self.alpha / (self.alpha + self.beta)
+impl BetaConfidence {
+    fn new() -> Self {
+        Self { alpha: 1.0, beta: 1.0 }
+    }
 
-    def update(self, evidence_type: str):
-        weights = EVIDENCE_WEIGHTS[evidence_type]
-        self.alpha += weights.get('alpha', 0)
-        self.beta += weights.get('beta', 0)
+    fn confidence(&self) -> f32 {
+        self.alpha / (self.alpha + self.beta)
+    }
 
-    def display(self) -> str:
-        support = self.alpha - 1  # subtract prior
-        contradict = self.beta - 1
-        return f"{support:.0f} supporting, {contradict:.0f} contradicting (confidence: {self.confidence:.2f})"
+    fn update(&mut self, evidence_type: &str) {
+        let weights = EVIDENCE_WEIGHTS.get(evidence_type)
+            .expect("unknown evidence type");
+        self.alpha += weights.alpha;
+        self.beta += weights.beta;
+    }
+
+    fn display(&self) -> String {
+        let support = self.alpha - 1.0; // subtract prior
+        let contradict = self.beta - 1.0;
+        format!("{:.0} supporting, {:.0} contradicting (confidence: {:.2})",
+            support, contradict, self.confidence())
+    }
+}
 ```
 
 ## Concept Vitality Model
@@ -66,36 +76,32 @@ Vitality is a composite score that determines whether a concept should be promot
 
 ### Vitality Dimensions
 
-```python
-def compute_vitality(concept) -> float:
-    now = datetime.now()
+```rust
+fn compute_vitality(concept: &Concept) -> f32 {
+    // 1. Time decay (90-day half-life)
+    let days = days_since(&concept.last_recalled_at);
+    let time_decay = (-days as f32 / 90.0).exp();
 
-    # 1. Time decay (90-day half-life)
-    days = (now - concept.last_recalled_at).days
-    time_decay = math.exp(-days / 90)
+    // 2. Recall success rate
+    let success_rate = if concept.recall_count > 0 {
+        concept.successful_recall_count as f32 / concept.recall_count as f32
+    } else { 0.5 };
 
-    # 2. Recall success rate
-    success_rate = (
-        concept.successful_recall_count / concept.recall_count
-        if concept.recall_count > 0 else 0.5
-    )
+    // 3. Source diversity (5-session cap)
+    let diversity = (concept.unique_session_count as f32 / 5.0).min(1.0);
 
-    # 3. Source diversity (5-session cap)
-    diversity = min(1.0, concept.unique_session_count / 5)
+    // 4. Network connectivity (10-connection cap)
+    let connectivity = (concept.connection_count as f32 / 10.0).min(1.0);
 
-    # 4. Network connectivity (10-connection cap)
-    connectivity = min(1.0, concept.connection_count / 10)
+    // 5. Bayesian confidence
+    let bayesian = concept.evidence_alpha / (concept.evidence_alpha + concept.evidence_beta);
 
-    # 5. Bayesian confidence
-    bayesian = concept.evidence_alpha / (concept.evidence_alpha + concept.evidence_beta)
-
-    return (
-        0.30 * bayesian +
-        0.25 * success_rate +
-        0.20 * diversity +
-        0.15 * time_decay +
-        0.10 * connectivity
-    )
+    0.30 * bayesian +
+    0.25 * success_rate +
+    0.20 * diversity +
+    0.15 * time_decay +
+    0.10 * connectivity
+}
 ```
 
 ### Vitality Thresholds
@@ -112,57 +118,68 @@ def compute_vitality(concept) -> float:
 
 ### Auto-Confirmation Algorithm
 
-```python
-def check_auto_confirmation(concept) -> AutoConfirmResult:
-    """
-    Determine if a concept can be auto-confirmed without human review.
-    ALL conditions must be true.
-    """
-    vitality = compute_vitality(concept)
-    bayesian_confidence = concept.evidence_alpha / (concept.evidence_alpha + concept.evidence_beta)
+```rust
+struct AutoConfirmResult {
+    can_confirm: bool,
+    vitality_sufficient: bool,
+    enough_sessions: bool,
+    no_conflicts: bool,
+    bayesian_confident: bool,
+    vitality: f32,
+    confidence: f32,
+}
 
-    conditions = {
-        'vitality_sufficient': vitality > 0.80,
-        'enough_sessions': concept.unique_session_count >= 3,
-        'no_conflicts': concept.conflicts == 0,
-        'bayesian_confident': bayesian_confidence > 0.75,
+fn check_auto_confirmation(concept: &Concept) -> AutoConfirmResult {
+    // Determine if a concept can be auto-confirmed without human review.
+    // ALL conditions must be true.
+    let vitality = compute_vitality(concept);
+    let bayesian_confidence = concept.evidence_alpha / (concept.evidence_alpha + concept.evidence_beta);
+
+    let vitality_sufficient = vitality > 0.80;
+    let enough_sessions = concept.unique_session_count >= 3;
+    let no_conflicts = concept.conflicts == 0;
+    let bayesian_confident = bayesian_confidence > 0.75;
+
+    AutoConfirmResult {
+        can_confirm: vitality_sufficient && enough_sessions && no_conflicts && bayesian_confident,
+        vitality_sufficient,
+        enough_sessions,
+        no_conflicts,
+        bayesian_confident,
+        vitality,
+        confidence: bayesian_confidence,
     }
-
-    return AutoConfirmResult(
-        can_confirm=all(conditions.values()),
-        conditions=conditions,
-        vitality=vitality,
-        confidence=bayesian_confidence
-    )
+}
 ```
 
 ### Semantic Equivalence Detection
 
 Determine if two observations express the same fact:
 
-```python
-def are_semantically_equivalent(obs_a, obs_b, embedding_sim) -> bool:
-    # Hard match: identical entities + predicate
-    if (obs_a.subject_text == obs_b.subject_text and
-        obs_a.predicate == obs_b.predicate and
-        obs_a.object_text == obs_b.object_text):
-        return True
+```rust
+fn are_semantically_equivalent(obs_a: &Observation, obs_b: &Observation, embedding_sim: f32) -> bool {
+    // Hard match: identical entities + predicate
+    if obs_a.subject_text == obs_b.subject_text &&
+       obs_a.predicate == obs_b.predicate &&
+       obs_a.object_text == obs_b.object_text {
+        return true;
+    }
 
-    # Soft match: entity overlap + high similarity
-    entity_overlap = (
-        obs_a.subject_text in obs_b.subject_text or
-        obs_b.subject_text in obs_a.subject_text
-    )
-    if entity_overlap and embedding_sim > 0.85:
-        return True
+    // Soft match: entity overlap + high similarity
+    let entity_overlap = obs_a.subject_text.contains(&obs_b.subject_text) ||
+                         obs_b.subject_text.contains(&obs_a.subject_text);
+    if entity_overlap && embedding_sim > 0.85 {
+        return true;
+    }
 
-    return False
+    false
+}
 
-def are_conflicting(obs_a, obs_b) -> bool:
-    """Same entity, opposite predicates."""
-    if obs_a.subject_text != obs_b.subject_text:
-        return False
-    return is_negation_pair(obs_a.predicate, obs_b.predicate)
+fn are_conflicting(obs_a: &Observation, obs_b: &Observation) -> bool {
+    // Same entity, opposite predicates.
+    if obs_a.subject_text != obs_b.subject_text { return false; }
+    is_negation_pair(&obs_a.predicate, &obs_b.predicate)
+}
 ```
 
 ### Cross-Session Scoring
@@ -182,40 +199,40 @@ When a concept is recalled, it enters a **labile** (unstable) state — analogou
 
 ### Labile State
 
-```python
-def mark_labile(concept_id: str, timeout_hours: float = 1.0):
-    """
-    Mark concept as labile on recall.
-    timeout_hours: how long the concept stays modifiable (default: 1 hour).
-    """
-    concept = get_concept(concept_id)
-    concept.status = 'labile'
-    concept.labile_since = now()
-    concept.labile_timeout = now() + timedelta(hours=timeout_hours)
+```rust
+fn mark_labile(concept_id: &str, timeout_hours: f32) -> Result<(), MemoryError> {
+    // Mark concept as labile on recall.
+    // timeout_hours: how long the concept stays modifiable (default: 1 hour).
+    let mut concept = get_concept(concept_id)?;
+    concept.status = ConceptStatus::Labile;
+    concept.labile_since = Some(Utc::now());
+    concept.labile_timeout = Some(Utc::now() + Duration::hours(timeout_hours as i64));
+    update_concept(&concept)
+}
 ```
 
 ### Reconsolidation
 
-```python
-def reconsolidate(concept):
-    """
-    Re-consolidate a labile concept.
-    Triggered by: labile timeout, user confirmation, or user correction.
-    """
-    if concept.status != 'labile':
-        return
+```rust
+fn reconsolidate(concept: &mut Concept) -> Result<(), MemoryError> {
+    // Re-consolidate a labile concept.
+    // Triggered by: labile timeout, user confirmation, or user correction.
+    if concept.status != ConceptStatus::Labile { return Ok(()); }
 
-    if concept.pending_corrections:
-        # User provided corrections during labile window
-        apply_corrections(concept)
-        concept.evidence_alpha += 0.3  # reward for successful correction integration
-    else:
-        # No corrections — recall was successful
-        concept.successful_recall_count += 1
-        concept.evidence_alpha += 0.1  # weak positive: successful recall strengthens memory
+    if !concept.pending_corrections.is_empty() {
+        // User provided corrections during labile window
+        apply_corrections(concept)?;
+        concept.evidence_alpha += 0.3; // reward for successful correction integration
+    } else {
+        // No corrections — recall was successful
+        concept.successful_recall_count += 1;
+        concept.evidence_alpha += 0.1; // weak positive: successful recall strengthens memory
+    }
 
-    concept.status = 'active'
-    concept.last_consolidated_at = now()
+    concept.status = ConceptStatus::Active;
+    concept.last_consolidated_at = Some(Utc::now());
+    update_concept(concept)
+}
 ```
 
 ### Labile Window Behavior
@@ -234,26 +251,21 @@ def reconsolidate(concept):
 
 ### Feedback Classification
 
-```python
-def classify_feedback(feedback_text: str) -> str:
-    """
-    Classify user feedback type.
-    Returns: 'confirm' | 'negate' | 'supplement' | 'correct' | 'preference'
-    """
-    negate_keywords = ['不对', '错了', '不是', '不正确', 'no', 'wrong', '不是这个']
-    confirm_keywords = ['对', '没错', '正确', '是的', 'yes', 'right', '就是这个']
-    supplement_keywords = ['还有', '补充', '另外', '加上', 'also', 'and']
-    correct_keywords = ['应该是', '其实是', '实际上是', 'actually', 'should be']
+```rust
+fn classify_feedback(feedback_text: &str) -> &str {
+    // Classify user feedback type.
+    // Returns: "confirm" | "negate" | "supplement" | "correct" | "preference" | "general"
+    let negate_keywords = ["不对", "错了", "不是", "不正确", "no", "wrong", "不是这个"];
+    let confirm_keywords = ["对", "没错", "正确", "是的", "yes", "right", "就是这个"];
+    let supplement_keywords = ["还有", "补充", "另外", "加上", "also", "and"];
+    let correct_keywords = ["应该是", "其实是", "实际上是", "actually", "should be"];
 
-    if any(kw in feedback_text for kw in negate_keywords):
-        return 'negate'
-    if any(kw in feedback_text for kw in confirm_keywords):
-        return 'confirm'
-    if any(kw in feedback_text for kw in supplement_keywords):
-        return 'supplement'
-    if any(kw in feedback_text for kw in correct_keywords):
-        return 'correct'
-    return 'general'
+    if negate_keywords.iter().any(|kw| feedback_text.contains(kw)) { return "negate"; }
+    if confirm_keywords.iter().any(|kw| feedback_text.contains(kw)) { return "confirm"; }
+    if supplement_keywords.iter().any(|kw| feedback_text.contains(kw)) { return "supplement"; }
+    if correct_keywords.iter().any(|kw| feedback_text.contains(kw)) { return "correct"; }
+    "general"
+}
 ```
 
 ### Revision Actions
@@ -268,46 +280,59 @@ def classify_feedback(feedback_text: str) -> str:
 
 ### Confidence Status After Revision
 
-```python
-def apply_revision(concept, feedback_type, feedback_text):
-    # 1. Update alpha/beta
-    concept.evidence_alpha += REVISION_WEIGHTS[feedback_type]['alpha']
-    concept.evidence_beta += REVISION_WEIGHTS[feedback_type]['beta']
+```rust
+fn apply_revision(
+    concept: &mut Concept,
+    feedback_type: &str,
+    feedback_text: &str,
+) -> Result<(), MemoryError> {
+    // 1. Update alpha/beta
+    let weights = REVISION_WEIGHTS.get(feedback_type)
+        .expect("unknown feedback type");
+    concept.evidence_alpha += weights.alpha;
+    concept.evidence_beta += weights.beta;
 
-    # 2. Recompute confidence
-    concept.confidence = concept.evidence_alpha / (concept.evidence_alpha + concept.evidence_beta)
+    // 2. Recompute confidence
+    concept.confidence = concept.evidence_alpha / (concept.evidence_alpha + concept.evidence_beta);
 
-    # 3. Check status transitions
-    if concept.confidence < 0.40 and concept.status in ('confirmed', 'auto_confirmed'):
-        concept.status = 'deprecated'
-    elif concept.confidence < 0.40 and concept.status == 'candidate':
-        concept.status = 'deprecated' if days_since(concept.created_at) > 30 else concept.status
+    // 3. Check status transitions
+    if concept.confidence < 0.40 &&
+       (concept.status == ConceptStatus::Confirmed || concept.status == ConceptStatus::AutoConfirmed) {
+        concept.status = ConceptStatus::Deprecated;
+    } else if concept.confidence < 0.40 && concept.status == ConceptStatus::Candidate {
+        if days_since(&concept.created_at) > 30 {
+            concept.status = ConceptStatus::Deprecated;
+        }
+    }
 
-    # 4. Special actions
-    if feedback_type == 'negate':
-        create_rejected_hypothesis(concept, feedback_text)
-    elif feedback_type == 'correct':
-        reject_old_and_create_new(concept, feedback_text)
-    elif feedback_type == 'supplement':
-        add_entities_from_feedback(concept, feedback_text)
+    // 4. Special actions
+    match feedback_type {
+        "negate" => create_rejected_hypothesis(concept, feedback_text)?,
+        "correct" => reject_old_and_create_new(concept, feedback_text)?,
+        "supplement" => add_entities_from_feedback(concept, feedback_text)?,
+        _ => {}
+    }
+
+    update_concept(concept)
+}
 ```
 
 ## Time Decay
 
 ### Decay Schedule
 
-```python
-def apply_time_decay(concept, now: datetime):
-    """
-    Apply gentle time decay to inactive concepts.
-    Runs during periodic consolidation.
-    """
-    days_since_recall = (now - concept.last_recalled_at).days
+```rust
+fn apply_time_decay(concept: &mut Concept, now: &DateTime<Utc>) {
+    // Apply gentle time decay to inactive concepts.
+    // Runs during periodic consolidation.
+    let days_since_recall = (*now - concept.last_recalled_at).num_days();
 
-    if days_since_recall > 30:
-        decay_amount = 0.5 * (days_since_recall / 30)
-        concept.evidence_beta += decay_amount
-        concept.confidence = concept.evidence_alpha / (concept.evidence_alpha + concept.evidence_beta)
+    if days_since_recall > 30 {
+        let decay_amount = 0.5 * (days_since_recall as f32 / 30.0);
+        concept.evidence_beta += decay_amount;
+        concept.confidence = concept.evidence_alpha / (concept.evidence_alpha + concept.evidence_beta);
+    }
+}
 ```
 
 **Half-life**: ~90 days (concept loses ~50% vitality if never recalled).
@@ -332,17 +357,19 @@ The system proactively identifies the most valuable questions to ask the user. N
 
 ### Signature
 
-```python
-class ActiveLearner:
-    def get_questions(
-        self,
-        workspace_id: str,
-        max_questions: int = 3
-    ) -> list[Question]:
-        """
-        Generate prioritized questions for user confirmation.
-        Returns at most max_questions, sorted by priority.
-        """
+```rust
+struct ActiveLearner;
+
+impl ActiveLearner {
+    fn get_questions(
+        &self,
+        workspace_id: &str,
+        max_questions: usize,
+    ) -> Result<Vec<Question>, MemoryError> {
+        // Generate prioritized questions for user confirmation.
+        // Returns at most max_questions, sorted by priority.
+    }
+}
 ```
 
 ### Question Types and Priority
@@ -364,63 +391,77 @@ class ActiveLearner:
 
 ### Implementation
 
-```python
-@dataclass
-class Question:
-    type: str               # 'near_confirm' | 'conflict_resolve' | 'alias_confirm' | 'stale_review'
-    priority: float         # 0.0 - 1.0
-    concept_id: str | None
-    text: str               # Natural language question for user
-    options: list[str]      # Suggested answers
-    evidence_summary: str   # Why we're asking
+```rust
+struct Question {
+    q_type: QuestionType,   // NearConfirm | ConflictResolve | AliasConfirm | StaleReview
+    priority: f32,          // 0.0 - 1.0
+    concept_id: Option<String>,
+    text: String,           // Natural language question for user
+    options: Vec<String>,   // Suggested answers
+    evidence_summary: String, // Why we're asking
+}
 
-def get_questions(workspace_id, max_questions=3):
-    candidates = []
+fn get_questions(workspace_id: &str, max_questions: usize) -> Result<Vec<Question>, MemoryError> {
+    let mut candidates = Vec::new();
 
-    # Near-confirm: concept almost meets auto-confirmation threshold
-    for concept in get_concepts(workspace_id, status='candidate'):
-        if 0.65 < concept.confidence < 0.75:
-            candidates.append(Question(
-                type='near_confirm', priority=0.9,
-                concept_id=concept.id,
-                text=f"以下信息多次出现，可以确认吗？\n{concept.known_facts[0]}",
-                options=['确认', '否定', '不确定'],
-                evidence_summary=f"{concept.evidence_count} 条证据来自 {concept.unique_session_count} 个 session"
-            ))
+    // Near-confirm: concept almost meets auto-confirmation threshold
+    for concept in get_concepts(workspace_id, ConceptStatus::Candidate)? {
+        if concept.confidence > 0.65 && concept.confidence < 0.75 {
+            candidates.push(Question {
+                q_type: QuestionType::NearConfirm,
+                priority: 0.9,
+                concept_id: Some(concept.id.clone()),
+                text: format!("以下信息多次出现，可以确认吗？\n{}", concept.known_facts[0]),
+                options: vec!["确认".into(), "否定".into(), "不确定".into()],
+                evidence_summary: format!("{} 条证据来自 {} 个 session",
+                    concept.evidence_count, concept.unique_session_count),
+            });
+        }
+    }
 
-    # Conflict resolution
-    for concept in get_concepts(workspace_id, status='disputed'):
-        candidates.append(Question(
-            type='conflict_resolve', priority=0.8,
-            concept_id=concept.id,
-            text=f"发现矛盾信息：\nA: {concept.conflicts[0]}\nB: {concept.conflicts[1]}\n哪个正确？",
-            options=['A 正确', 'B 正确', '都不对', '都对（不同上下文）'],
-            evidence_summary=f"{len(concept.conflicts)} 处矛盾"
-        ))
+    // Conflict resolution
+    for concept in get_concepts(workspace_id, ConceptStatus::Disputed)? {
+        candidates.push(Question {
+            q_type: QuestionType::ConflictResolve,
+            priority: 0.8,
+            concept_id: Some(concept.id.clone()),
+            text: format!("发现矛盾信息：\nA: {}\nB: {}\n哪个正确？",
+                concept.conflicts[0], concept.conflicts[1]),
+            options: vec!["A 正确".into(), "B 正确".into(), "都不对".into(), "都对（不同上下文）".into()],
+            evidence_summary: format!("{} 处矛盾", concept.conflicts.len()),
+        });
+    }
 
-    # Entity alias
-    for alias in get_unconfirmed_aliases(workspace_id):
-        candidates.append(Question(
-            type='alias_confirm', priority=0.6,
-            text=f'"{alias.term_a}" 和 "{alias.term_b}" 是同一个东西吗？',
-            options=['是', '不是', '相关但不同'],
-            evidence_summary=f"在 {alias.co_occurrence_count} 个 session 中共同出现"
-        ))
+    // Entity alias
+    for alias in get_unconfirmed_aliases(workspace_id)? {
+        candidates.push(Question {
+            q_type: QuestionType::AliasConfirm,
+            priority: 0.6,
+            concept_id: None,
+            text: format!("\"{}\" 和 \"{}\" 是同一个东西吗？", alias.term_a, alias.term_b),
+            options: vec!["是".into(), "不是".into(), "相关但不同".into()],
+            evidence_summary: format!("在 {} 个 session 中共同出现", alias.co_occurrence_count),
+        });
+    }
 
-    # Stale review
-    for concept in get_concepts(workspace_id, status='candidate'):
-        days = days_since(concept.created_at)
-        if days > 14 and concept.confidence < 0.5:
-            candidates.append(Question(
-                type='stale_review', priority=0.5,
-                concept_id=concept.id,
-                text=f"这个概念已存在 {days} 天但置信度较低，仍然相关吗？\n{concept.summary}",
-                options=['仍然相关', '已过时', '合并到其他概念'],
-                evidence_summary=f"置信度 {concept.confidence:.2f}，{concept.recall_count} 次召回"
-            ))
+    // Stale review
+    for concept in get_concepts(workspace_id, ConceptStatus::Candidate)? {
+        let days = days_since(&concept.created_at);
+        if days > 14 && concept.confidence < 0.5 {
+            candidates.push(Question {
+                q_type: QuestionType::StaleReview,
+                priority: 0.5,
+                concept_id: Some(concept.id.clone()),
+                text: format!("这个概念已存在 {} 天但置信度较低，仍然相关吗？\n{}", days, concept.summary),
+                options: vec!["仍然相关".into(), "已过时".into(), "合并到其他概念".into()],
+                evidence_summary: format!("置信度 {:.2}，{} 次召回", concept.confidence, concept.recall_count),
+            });
+        }
+    }
 
-    candidates.sort(key=lambda q: -q.priority)
-    return candidates[:max_questions]
+    candidates.sort_by(|a, b| b.priority.partial_cmp(&a.priority).unwrap());
+    Ok(candidates.into_iter().take(max_questions).collect())
+}
 ```
 
 ## Adversarial Validation
@@ -431,17 +472,19 @@ A second LLM (Validator) challenges each extracted observation. This addresses t
 
 ### Signature
 
-```python
-class AdversarialValidator:
-    def validate(
-        self,
-        observations: list[Observation],
-        raw_text: str
-    ) -> list[ValidatedObservation]:
-        """
-        Validate extracted observations against source text.
-        Returns validated observations with verdicts.
-        """
+```rust
+struct AdversarialValidator;
+
+impl AdversarialValidator {
+    fn validate(
+        &self,
+        observations: &[Observation],
+        raw_text: &str,
+    ) -> Result<Vec<ValidatedObservation>, MemoryError> {
+        // Validate extracted observations against source text.
+        // Returns validated observations with verdicts.
+    }
+}
 ```
 
 ### Validation Criteria
@@ -464,27 +507,32 @@ Each observation is challenged on five dimensions:
 
 ### Implementation
 
-```python
-@dataclass
-class ValidationChallenge:
-    accepted: bool
-    partial: bool
-    reason: str
-    criteria_failed: list[str]
+```rust
+struct ValidationChallenge {
+    accepted: bool,
+    partial: bool,
+    reason: String,
+    criteria_failed: Vec<String>,
+}
 
-def validate_observation(obs, raw_text, validator_llm):
-    challenge = validator_llm.challenge(
+fn validate_observation(
+    obs: &Observation,
+    raw_text: &str,
+    validator_llm: &dyn LlmProvider,
+) -> Result<ValidationChallenge, MemoryError> {
+    let challenge = validator_llm.challenge(
         observation=obs,
         source_text=raw_text,
-        criteria=[
+        criteria=&[
             "是否有明确的证据支持？",
             "是否过度推测？",
             "subject/predicate/object 是否准确？",
             "置信度是否合理？",
-            "是否混淆了用户事实和助手推测？"
+            "是否混淆了用户事实和助手推测？",
         ]
-    )
-    return challenge
+    )?;
+    Ok(challenge)
+}
 ```
 
 ### Cost Control Strategies

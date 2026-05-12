@@ -53,7 +53,7 @@ MVP 证明 pipeline 跑得通。
 | 1.2 | Session ingest（markdown/JSON/Trellis journal） | 支持至少 2 种格式 |
 | 1.3 | **实体规范化层** | 大小写归一、后缀剥离、别名表 |
 | 1.4 | LLM Observation Extractor | 结构化 JSON 输出 + source_type 标注 |
-| 1.5 | Beta-Bernoulli confidence updater | ~50 行纯 Python |
+| 1.5 | Beta-Bernoulli confidence updater | ~80 行纯 Rust，零外部依赖 |
 | 1.6 | CLI: `memory ingest-session`, `memory list-observations` | |
 
 **评审修复**：实体规范化层是 CRITICAL——解决了 LLM 实体名称不一致问题。
@@ -62,9 +62,9 @@ MVP 证明 pipeline 跑得通。
 
 | 任务 | 产出 | 评审关键点 |
 |------|------|----------|
-| 2.1 | Embedding service（bge-small-zh-v1.5） | 模型缓存到 ~/.memory-runtime/models/ |
-| 2.2 | **BLOB 存储优先**（sqlite-vec 作为优化后续加入） | 避免 beta 依赖 |
-| 2.3 | HAC 聚类 + 可配置阈值 | 聚类结果与 ground truth 对比 |
+| 2.1 | Embedding service（bge-small-zh-v1.5 via candle-transformers） | 模型缓存到 ~/.memory-runtime/models/ |
+| 2.2 | **BLOB 存储优先**（sqlite-vec 作为优化后续加入） | 避免 beta 依赖（rusqlite BLOB） |
+| 2.3 | HAC 聚类（linfa-clustering）+ 可配置阈值 | 聚类结果与 ground truth 对比 |
 | 2.4 | 实体重叠二次合并 | |
 | 2.5 | LLM 概念命名 | 回退：实体拼接命名 |
 | 2.6 | Concept Candidate Builder | |
@@ -78,7 +78,7 @@ MVP 证明 pipeline 跑得通。
 | 3.2 | 语义召回（embedding 余弦相似度） | |
 | 3.3 | 双通道合并（语义 60% + 实体 40%） | |
 | 3.4 | Memory Context 生成（≤1500 tokens） | |
-| 3.5 | **持久化 Python daemon**（非 CLI subprocess） | 解决冷启动和环境问题 |
+| 3.5 | **持久化 daemon**（编译后单二进制，非 CLI subprocess） | 解决冷启动和环境问题 |
 | 3.6 | prehook：注入 Memory Context 到 Claude Code | |
 | 3.7 | posthook：捕获对话用于后续抽取 | |
 | 3.8 | Feedback 分类 + Beta 更新 | |
@@ -98,12 +98,21 @@ MVP 证明 pipeline 跑得通。
 
 ### MVP 依赖
 
-| 包 | 用途 | 何时引入 |
-|----|------|---------|
-| numpy | 向量运算 + Beta 数学 | Phase 1 |
-| sentence-transformers + bge-small-zh-v1.5 | 嵌入 | Phase 2 |
-| scikit-learn | HAC 聚类 | Phase 2 |
-| sqlite-vec | 向量搜索优化 | Phase 2（可选，BLOB 优先） |
+| Crate | 用途 | 大小 | 何时引入 |
+|-------|------|------|---------|
+| ndarray | 向量运算 + Beta 数学 | ~20MB | Phase 1 |
+| candle-transformers + candle-nn | 嵌入模型推理（bge-small-zh-v1.5） | ~50MB | Phase 2 |
+| bge-small-zh-v1.5 权重 | 中文嵌入 | ~90MB | Phase 2 |
+| linfa-clustering | HAC 聚类 | ~10MB | Phase 2 |
+| rusqlite | SQLite 存储 | ~5MB | Phase 1 |
+| clap | CLI | ~2MB | Phase 1 |
+| tokio | 异步运行时 | ~5MB | Phase 3 |
+| serde + serde_json | 序列化 | ~3MB | Phase 1 |
+| uuid | ID 生成 | ~1MB | Phase 1 |
+| chrono | 时间处理 | ~1MB | Phase 1 |
+| reqwest | HTTP（LLM API 调用） | ~3MB | Phase 1 |
+
+总计约 ~190MB（含模型权重 ~90MB）。
 
 ---
 
@@ -183,6 +192,7 @@ MVP 证明 pipeline 跑得通。
 | 7.5 | 再巩固（labile 状态 + 1h 超时 + 成功回忆增强） |
 | 7.6 | Hysteresis vitality threshold（降级 0.40 / 恢复 0.50） |
 | 7.7 | Incremental embedding update（drift > 0.15 时重新嵌入） |
+| 7.8 | LLM 意图分类（替代 MVP 硬编码关键词，合并到 Memory Context 生成，零额外成本） |
 
 **激活阈值**: concept_count ≥ 50（概念多到需要高级过滤机制）。
 

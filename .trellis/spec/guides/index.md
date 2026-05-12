@@ -23,6 +23,7 @@ These guides help you **ask the right questions before coding**.
 |-------|---------|-------------|
 | [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md) | Identify patterns and reduce duplication | When you notice repeated patterns |
 | [Cross-Layer Thinking Guide](./cross-layer-thinking-guide.md) | Think through data flow across layers | Features spanning multiple layers |
+| [Implementation Thinking Guide](./implementation-thinking-guide.md) | Memory Runtime implementation checklist | Before starting each MVP phase |
 
 ---
 
@@ -46,6 +47,15 @@ These guides help you **ask the right questions before coding**.
 - [ ] **You're creating a new utility/helper function** ← Search first!
 
 → Read [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md)
+
+### When to Think About Implementation Readiness
+
+- [ ] About to start a new MVP phase
+- [ ] Integrating Candle / ML dependencies
+- [ ] Setting up LLM call chains
+- [ ] Measuring recall latency
+
+→ Read [Implementation Thinking Guide](./implementation-thinking-guide.md)
 
 ---
 

@@ -45,18 +45,17 @@ Extract raw observations from input sources.
 LLM-powered extraction using **Predictive Coding** — the brain doesn't record everything, it generates predictions and only processes prediction errors (surprises).
 
 **Signature**:
-```python
-def extract_observations(
-    raw_memory: RawMemory,
-    existing_concepts: list[Concept]
-) -> ExtractResult:
-    """
-    Extract observations using predictive coding:
-    1. Generate predictions from existing concepts
-    2. Compare predictions against actual content
-    3. Only extract "prediction errors" (novel information)
-    4. Record confirming evidence separately (low surprise)
-    """
+```rust
+fn extract_observations(
+    raw_memory: &RawMemory,
+    existing_concepts: &[Concept],
+) -> Result<ExtractResult, MemoryError> {
+    // Extract observations using predictive coding:
+    // 1. Generate predictions from existing concepts
+    // 2. Compare predictions against actual content
+    // 3. Only extract "prediction errors" (novel information)
+    // 4. Record confirming evidence separately (low surprise)
+}
 ```
 
 **Output fields per observation**:
@@ -72,30 +71,46 @@ def extract_observations(
 - `surprise_score`: How unexpected this observation is relative to existing concepts (0-1)
 
 **Predictive Coding Flow**:
-```python
-def predictive_extract(raw_memory, existing_concepts):
-    # 1. Generate predictions from existing concepts
-    predictions = generate_predictions(existing_concepts, raw_memory.context)
+```rust
+fn predictive_extract(
+    raw_memory: &RawMemory,
+    existing_concepts: &[Concept],
+) -> (Vec<PredictionError>, Vec<PredictionError>) {
+    // 1. Generate predictions from existing concepts
+    let predictions = generate_predictions(existing_concepts, &raw_memory.context);
 
-    # 2. Compare against reality
-    prediction_errors = []
-    for prediction in predictions:
-        actual = check_against_reality(prediction, raw_memory)
-        if actual != prediction.expected:
-            prediction_errors.append(PredictionError(
-                concept_id=prediction.concept_id,
-                expected=prediction.expected,
-                actual=actual,
-                surprise_score=abs(prediction.confidence - actual.confidence)
-            ))
+    // 2. Compare against reality
+    let prediction_errors: Vec<PredictionError> = predictions
+        .iter()
+        .filter_map(|pred| {
+            let actual = check_against_reality(pred, raw_memory);
+            if actual != pred.expected {
+                Some(PredictionError {
+                    concept_id: pred.concept_id.clone(),
+                    expected: pred.expected.clone(),
+                    actual,
+                    surprise_score: (pred.confidence - actual.confidence).abs(),
+                })
+            } else {
+                None
+            }
+        })
+        .collect();
 
-    # 3. High surprise = worth extracting as new observation
-    novel = [e for e in prediction_errors if e.surprise_score > 0.3]
+    // 3. High surprise = worth extracting as new observation
+    let novel: Vec<_> = prediction_errors.iter()
+        .filter(|e| e.surprise_score > 0.3)
+        .cloned()
+        .collect();
 
-    # 4. Low surprise = confirming evidence (update alpha, don't create new obs)
-    confirming = [e for e in prediction_errors if e.surprise_score <= 0.1]
+    // 4. Low surprise = confirming evidence (update alpha, don't create new obs)
+    let confirming: Vec<_> = prediction_errors.iter()
+        .filter(|e| e.surprise_score <= 0.1)
+        .cloned()
+        .collect();
 
-    return novel, confirming
+    (novel, confirming)
+}
 ```
 
 **Why**: Avoids redundant storage. A project queried 100 times about POSMASK stores 1 observation + 99 confirmations, not 100 duplicate observations. Novel information (prediction errors) naturally gets higher initial weight.
@@ -112,15 +127,14 @@ def predictive_extract(raw_memory, existing_concepts):
 Second LLM challenges extracted observations before they enter the system. **Not in MVP** — MVP uses simple evidence-text substring check as a basic quality gate.
 
 **Signature**:
-```python
-def validate_observations(
-    observations: list[Observation],
-    raw_text: str
-) -> list[ValidatedObservation]:
-    """
-    Adversarial validation: Validator LLM challenges each observation.
-    Accepted observations proceed. Rejected ones marked disputed.
-    """
+```rust
+fn validate_observations(
+    observations: &[Observation],
+    raw_text: &str,
+) -> Result<Vec<ValidatedObservation>, MemoryError> {
+    // Adversarial validation: Validator LLM challenges each observation.
+    // Accepted observations proceed. Rejected ones marked disputed.
+}
 ```
 
 **Validation criteria**: evidence clarity, over-speculation, triple accuracy, confidence calibration, source attribution.
@@ -134,12 +148,11 @@ def validate_observations(
 Generate vector embeddings for observations. Includes incremental update for existing concepts.
 
 **Signature**:
-```python
-def embed_observation(observation: Observation) -> np.ndarray:
-    """
-    Embed observation text as 512-dim vector using bge-small-zh-v1.5.
-    Text = subject_text + " " + predicate + " " + object_text
-    """
+```rust
+fn embed_observation(observation: &Observation) -> Result<Array1<f32>, MemoryError> {
+    // Embed observation text as 512-dim vector using bge-small-zh-v1.5.
+    // Text = subject_text + " " + predicate + " " + object_text
+}
 ```
 
 **Embedding targets**:
@@ -151,7 +164,7 @@ def embed_observation(observation: Observation) -> np.ndarray:
 | Concept | `name + " " + definition` |
 | Recall Query | Raw user query |
 
-**Storage**: `vec_embedding` (sqlite-vec) with `embedding_ref` metadata table. Fallback: `embedding_blob` (BLOB) with numpy cosine similarity.
+**Storage**: `vec_embedding` (sqlite-vec) with `embedding_ref` metadata table. Fallback: `embedding_blob` (BLOB) with ndarray cosine similarity.
 
 **Incremental Embedding Update** `[Enhancement — Phase 7]`: During consolidation, check if concept content has drifted from its embedding. If cosine distance between current text embedding and stored embedding > 0.15, re-embed the concept. Runs offline as part of consolidation.
 
@@ -159,31 +172,34 @@ def embed_observation(observation: Observation) -> np.ndarray:
 
 Group related observations into concept candidates.
 
-**Primary algorithm**: Hierarchical Agglomerative Clustering (HAC) with cosine distance.
+**Primary algorithm**: Hierarchical Agglomerative Clustering (HAC) with cosine distance, via `linfa-clustering`.
 
-```python
-from sklearn.cluster import AgglomerativeClustering
+```rust
+use linfa_clustering::AgglomerativeClustering;
+use ndarray::Array2;
 
-clusterer = AgglomerativeClustering(
-    n_clusters=None,
-    distance_threshold=0.25,  # configurable per workspace
-    metric='cosine',
-    linkage='average'
-)
-labels = clusterer.fit_predict(observation_embeddings)
+let clusterer = AgglomerativeClustering::new(0.25) // distance threshold, configurable
+    .metric(Metric::Cosine)
+    .linkage(Linkage::Average);
+let labels = clusterer.fit(&observation_embeddings)?;
 ```
 
 **Secondary merge**: After HAC, merge clusters sharing entity names (subject or object fields) if centroid distance < 0.40. This compensates for embedding weaknesses on domain-specific terms.
 
 **Combined distance function**:
-```python
-def combined_distance(obs_a, obs_b, embedding_dist):
-    entities_a = {obs_a.subject_text, obs_a.object_text}
-    entities_b = {obs_b.subject_text, obs_b.object_text}
-    jaccard = len(entities_a & entities_b) / max(len(entities_a | entities_b), 1)
-    if jaccard > 0:
-        return embedding_dist * (1 - 0.5 * jaccard)
-    return embedding_dist
+```rust
+fn combined_distance(obs_a: &Observation, obs_b: &Observation, embedding_dist: f32) -> f32 {
+    let entities_a: HashSet<&str> = [&obs_a.subject_text, &obs_a.object_text].into_iter().collect();
+    let entities_b: HashSet<&str> = [&obs_b.subject_text, &obs_b.object_text].into_iter().collect();
+    let intersection = entities_a.intersection(&entities_b).count() as f32;
+    let union = entities_a.union(&entities_b).count() as f32;
+    let jaccard = intersection / union.max(1.0);
+    if jaccard > 0.0 {
+        embedding_dist * (1.0 - 0.5 * jaccard)
+    } else {
+        embedding_dist
+    }
+}
 ```
 
 **Incremental clustering**: New observations are compared against existing cluster centroids. If nearest centroid distance < merge_threshold, add to existing cluster and update centroid. Otherwise, create new cluster. Periodic full rebuild (every 7 days) prevents drift.
@@ -219,14 +235,13 @@ Offline consolidation engine — runs after each session import or on schedule. 
 **Complementary Learning**: Observations are first stored in the **hippocampal buffer** (fast storage, no modification of existing concepts). After a cooling period (default: 24 hours), the consolidation engine gradually integrates them into the concept store (slow storage). This prevents catastrophic overwriting — a single wrong session cannot destroy established concepts.
 
 **Signature**:
-```python
-def consolidate(workspace_id: str) -> ConsolidationReport:
-    """
-    1. Collect settled observations from hippocampal buffer (age >= 24h).
-    2. Cross-validate against all existing concepts.
-    3. Perform frequency counting, conflict detection, hierarchy detection.
-    4. Auto promote/demote based on vitality thresholds.
-    """
+```rust
+fn consolidate(workspace_id: &str) -> Result<ConsolidationReport, MemoryError> {
+    // 1. Collect settled observations from hippocampal buffer (age >= 24h).
+    // 2. Cross-validate against all existing concepts.
+    // 3. Perform frequency counting, conflict detection, hierarchy detection.
+    // 4. Auto promote/demote based on vitality thresholds.
+}
 ```
 
 **Steps**:
@@ -247,20 +262,23 @@ def consolidate(workspace_id: str) -> ConsolidationReport:
 - Conflict detection: same entity + opposite predicates
 
 **Hierarchy detection (Chunking)**:
-```python
-def detect_hierarchy(concepts):
-    """
-    Auto-detect parent/child concept relationships.
-    Rule: if A.entities ⊂ B.entities AND embedding_sim(A, B) > 0.7 → A is child of B.
-    """
-    edges = []
-    for child in concepts:
-        for parent in concepts:
-            if child.entities < parent.entities:
-                sim = cosine_similarity(child.embedding, parent.embedding)
-                if sim > 0.7:
-                    edges.append((child.id, parent.id, 'is_subconcept_of'))
-    return edges
+```rust
+fn detect_hierarchy(concepts: &[Concept]) -> Vec<(String, String, String)> {
+    // Auto-detect parent/child concept relationships.
+    // Rule: if A.entities ⊂ B.entities AND embedding_sim(A, B) > 0.7 → A is child of B.
+    let mut edges = Vec::new();
+    for child in concepts {
+        for parent in concepts {
+            if child.entities.is_subset(&parent.entities) {
+                let sim = cosine_similarity(&child.embedding, &parent.embedding);
+                if sim > 0.7 {
+                    edges.push((child.id.clone(), parent.id.clone(), "is_subconcept_of".into()));
+                }
+            }
+        }
+    }
+    edges
+}
 ```
 
 ### 9. Validate `[MVP]`（Hysteresis threshold 在 Phase 7 引入）
@@ -268,14 +286,20 @@ def detect_hierarchy(concepts):
 Assess concept quality using multi-dimensional vitality model.
 
 **Concept Vitality Score**:
-```python
-vitality = (
-    0.30 * bayesian_confidence +    # alpha / (alpha + beta)
-    0.25 * success_rate +           # successful_recalls / total_recalls
-    0.20 * diversity_score +        # min(1, unique_sessions / 5)
-    0.15 * time_decay +             # exp(-days_since_recall / 90)
-    0.10 * connectivity             # min(1, connection_count / 10)
-)
+```rust
+fn compute_vitality(concept: &Concept) -> f32 {
+    let bayesian = concept.evidence_alpha / (concept.evidence_alpha + concept.evidence_beta);
+    let success_rate = if concept.recall_count > 0 {
+        concept.successful_recall_count as f32 / concept.recall_count as f32
+    } else { 0.5 };
+    let diversity = (concept.unique_session_count as f32 / 5.0).min(1.0);
+    let days = days_since(&concept.last_recalled_at);
+    let time_decay = (-days as f32 / 90.0).exp();
+    let connectivity = (concept.connection_count as f32 / 10.0).min(1.0);
+
+    0.30 * bayesian + 0.25 * success_rate + 0.20 * diversity +
+    0.15 * time_decay + 0.10 * connectivity
+}
 ```
 
 ### 10. Promote `[MVP]`

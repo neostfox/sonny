@@ -1,0 +1,16 @@
+[package]
+name = "sonny-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "sonny"
+path = "src/main.rs"
+
+[dependencies]
+memory-runtime = { path = "../memory-runtime" }
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

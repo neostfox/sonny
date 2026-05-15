@@ -1,0 +1,35 @@
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RawMemory {
+    pub memory_id: String,
+    pub workspace_id: String,
+    pub session_id: String,
+    pub role: String,
+    pub content: String,
+    pub source_type: SourceType,
+    pub source_ref: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceType {
+    SessionFile,
+    TrellisJournal,
+    TrellisTask,
+    UserInput,
+    Manual,
+}
+
+impl SourceType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::SessionFile => "session_file",
+            Self::TrellisJournal => "trellis_journal",
+            Self::TrellisTask => "trellis_task",
+            Self::UserInput => "user_input",
+            Self::Manual => "manual",
+        }
+    }
+}

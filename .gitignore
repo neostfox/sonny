@@ -32,6 +32,12 @@ Thumbs.db
 
 # Models (downloaded at runtime)
 .memory-runtime/
+.sonny/
+
+# Rust
+/target/
+**/target/
+Cargo.lock
 
 # SQLite databases (generated at runtime)
 *.db

@@ -1,0 +1,10 @@
+[package]
+name = "memory-test-fixtures"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+memory-runtime = { path = "../memory-runtime" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = "0.1"

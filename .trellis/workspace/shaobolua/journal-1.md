@@ -71,3 +71,36 @@ Designed 3-crate Cargo workspace architecture (memory-runtime lib + sonny-cli bi
 ### Next Steps
 
 - None - task complete
+
+
+## Session 3: Phase 1: storage and extraction layer implementation
+
+**Date**: 2026-05-16
+**Task**: Phase 1: storage and extraction layer implementation
+**Branch**: `main`
+
+### Summary
+
+Implemented Phase 1 storage & extraction: rusqlite store layer (RawMemoryStore, ObservationStore, ConceptStore), session ingest (Trellis journal + JSON parsers), entity normalization (7-step canonical pipeline + alias table), LLM observation extractor (system/user prompt + JSON repair), BetaConfidence (13 evidence types), CLI commands (init, ingest-session, list-observations). 33 tests passing.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1b22ca2` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -9,7 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 memory-runtime = { path = "../memory-runtime" }
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 serde_json = { workspace = true }
 tracing = { workspace = true }

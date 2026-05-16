@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/memory-runtime/roadmap.md", "reason": "Verify Phase 1 deliverables match: 1.1-1.6 tasks, review checkpoints"}
+{"file": ".trellis/spec/memory-runtime/principles.md", "reason": "Check adherence: evidence required, no speculation confirmation, negation preservation"}
+{"file": ".trellis/spec/memory-runtime/quality-control.md", "reason": "Verify Beta-Bernoulli weight table matches spec (13 evidence types, alpha/beta values)"}
+{"file": ".trellis/spec/memory-runtime/memory-model.md", "reason": "Verify store implementations match schema: column names, types, constraints, indexes"}
+{"file": ".trellis/spec/memory-runtime/concept-growth.md", "reason": "Verify extraction pipeline follows Stage 1-2 signatures"}
+{"file": ".trellis/tasks/05-16-phase-1-storage-extraction/prd.md", "reason": "Check acceptance criteria all met"}

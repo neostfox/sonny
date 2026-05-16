@@ -38,3 +38,36 @@ Migrated all 6 spec files + plan file from Python to Rust tech stack. Key decisi
 ### Next Steps
 
 - None - task complete
+
+
+## Session 2: Architecture design and Rust workspace scaffold
+
+**Date**: 2026-05-16
+**Task**: Architecture design and Rust workspace scaffold
+**Branch**: `main`
+
+### Summary
+
+Designed 3-crate Cargo workspace architecture (memory-runtime lib + sonny-cli bin + memory-test-fixtures). Implemented error types, config, 10 domain models, SQLite migration system with 001_initial.sql, LLM/embedding trait abstractions, and MockLlmProvider. Cargo check and tests pass.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c0b14ab` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

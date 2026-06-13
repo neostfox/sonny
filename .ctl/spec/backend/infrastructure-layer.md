@@ -26,9 +26,9 @@ SQLite-backed persistence for all domain entities. Provides trait-based interfac
 ### Connection wrapper with WAL mode
 
 ```rust
-// crates/memory-runtime/src/store/connection.rs:7-19
+// crates/memory-runtime/src/store/connection.rs
 pub struct Database {
-    pub conn: Connection,
+    pub conn: Arc<parking_lot::Mutex<Connection>>,
     pub has_vec: bool,
 }
 ```
@@ -36,19 +36,20 @@ pub struct Database {
 - WAL mode for concurrent read/write
 - Foreign keys enforced
 - Migrations run on every open
+- Connection is `Arc<parking_lot::Mutex<Connection>>` — stores clone the Arc to share one DB (P0-B)
 
-### Mutex-guarded connection per store
+### Shared connection across stores
 
-Each store struct owns a `Mutex<Connection>`:
+Each store clones the `Arc<Mutex<Connection>>` from `Database`; multiple stores back the same database simultaneously:
 
 ```rust
-// crates/memory-runtime/src/store/raw_memory_store.rs:10-12
+// crates/memory-runtime/src/store/raw_memory_store.rs
 pub struct SqliteRawMemoryStore {
-    conn: Mutex<Connection>,
+    conn: Arc<Mutex<Connection>>,
 }
 ```
 
-Lock is acquired per-method-call. No transaction spanning multiple methods.
+`parking_lot::Mutex::lock()` returns a guard directly (no poisoning, no unwrap). Lock is acquired per-method-call. No transaction spanning multiple methods.
 
 ### Versioned migrations with `user_version` PRAGMA
 

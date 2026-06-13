@@ -4,22 +4,26 @@
     "cargo_test"
   ],
   "id": "p2c-observation-cooccurrence",
-  "is_archived": false,
+  "is_archived": true,
   "is_held": false,
-  "last_event_seq": 1,
+  "last_event_seq": 9,
   "objective": "Observation 共现关系：加 extraction_batch_id 字段，新增 coclaim 关联表，聚类可查询同批提取关联",
-  "phase": "planning",
+  "phase": "completed",
   "read_scope": [
     "crates/memory-runtime/src/migrations",
     "crates/memory-runtime/src/models/observation.rs",
-    "crates/memory-runtime/src/store"
+    "crates/memory-runtime/src/pipeline/extract.rs",
+    "crates/memory-runtime/src/store",
+    "crates/memory-runtime/tests/integration_test.rs"
   ],
   "risk_triggers": [],
   "schema": "control.task-view.v1",
   "write_allow": [
     "crates/memory-runtime/src/migrations",
     "crates/memory-runtime/src/models/observation.rs",
-    "crates/memory-runtime/src/store"
+    "crates/memory-runtime/src/pipeline/extract.rs",
+    "crates/memory-runtime/src/store",
+    "crates/memory-runtime/tests/integration_test.rs"
   ],
   "write_deny": []
 }

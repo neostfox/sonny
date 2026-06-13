@@ -24,10 +24,10 @@ const OBS_COLUMNS: &str = "\
     observation_id, workspace_id, memory_id, subject_text, subject_type, \
     predicate, object_text, object_type, evidence_text, extraction_confidence, evidence_alpha, evidence_beta, \
     status, surprise_score, source_type, consolidated, created_at, \
-    memory_type_candidate, observation_detail_json";
+    memory_type_candidate, observation_detail_json, extraction_batch_id";
 
 static OBS_INSERT: LazyLock<String> = LazyLock::new(|| {
-    format!("INSERT INTO observation ({OBS_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)")
+    format!("INSERT INTO observation ({OBS_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)")
 });
 static OBS_GET: LazyLock<String> =
     LazyLock::new(|| format!("SELECT {OBS_COLUMNS} FROM observation WHERE observation_id = ?1"));
@@ -36,6 +36,15 @@ static OBS_LIST: LazyLock<String> = LazyLock::new(|| {
 });
 static OBS_FIND_BY_ENTITY: LazyLock<String> = LazyLock::new(|| {
     format!("SELECT {OBS_COLUMNS} FROM observation WHERE workspace_id = ?1 AND (subject_text = ?2 OR object_text = ?2) ORDER BY created_at DESC")
+});
+// P2-C: observations co-claimed with the given one (share an extraction batch edge).
+static OBS_FIND_COCLAIM: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "SELECT {OBS_COLUMNS} FROM observation WHERE observation_id IN (\
+            SELECT CASE WHEN observation_a = ?1 THEN observation_b ELSE observation_a END \
+            FROM observation_coclaim WHERE observation_a = ?1 OR observation_b = ?1\
+        ) ORDER BY created_at ASC"
+    )
 });
 
 impl ObservationStore for SqliteObservationStore {
@@ -65,6 +74,7 @@ impl ObservationStore for SqliteObservationStore {
                 &obs.created_at,
                 &obs.memory_type_candidate.as_ref().map(|t| t.as_str()),
                 &obs.observation_detail_json,
+                &obs.extraction_batch_id,
             ],
         )?;
         Ok(())
@@ -99,9 +109,12 @@ impl ObservationStore for SqliteObservationStore {
                         &obs.created_at,
                         &obs.memory_type_candidate.as_ref().map(|t| t.as_str()),
                         &obs.observation_detail_json,
+                        &obs.extraction_batch_id,
                     ],
                 )?;
             }
+            // P2-C: record coclaim co-occurrence edges for observations sharing a batch.
+            insert_coclaim_pairs(&tx, observations)?;
         }
         tx.commit()?;
         Ok(())
@@ -184,6 +197,11 @@ impl ObservationStore for SqliteObservationStore {
         };
         Ok(count > 0)
     }
+
+    fn find_coclaim(&self, observation_id: &str) -> MemoryResult<Vec<Observation>> {
+        let conn = self.conn.lock();
+        collect_rows(&conn, &OBS_FIND_COCLAIM, params![observation_id])
+    }
 }
 
 fn collect_rows(
@@ -196,6 +214,45 @@ fn collect_rows(
         .query_map(p, row_to_observation)?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
+}
+
+/// P2-C: write coclaim co-occurrence edges for observations sharing an extraction batch.
+/// Pairs are stored canonically (`observation_a < observation_b`) so the PK is stable
+/// regardless of input order; `INSERT OR IGNORE` keeps re-ingest idempotent.
+fn insert_coclaim_pairs(conn: &Connection, observations: &[Observation]) -> rusqlite::Result<()> {
+    // batch_id -> (workspace_id, observation_ids); only batches with >=2 members emit edges.
+    let mut batches: std::collections::HashMap<&str, (&str, Vec<&str>)> =
+        std::collections::HashMap::new();
+    for obs in observations {
+        if let Some(batch_id) = obs.extraction_batch_id.as_deref() {
+            let entry = batches
+                .entry(batch_id)
+                .or_insert((&obs.workspace_id, Vec::new()));
+            entry.1.push(&obs.observation_id);
+        }
+    }
+    if batches.is_empty() {
+        return Ok(());
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+    let mut stmt = conn.prepare_cached(
+        "INSERT OR IGNORE INTO observation_coclaim \
+         (observation_a, observation_b, batch_id, workspace_id, created_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+    )?;
+    for (batch_id, (ws, ids)) in &batches {
+        for i in 0..ids.len() {
+            for j in (i + 1)..ids.len() {
+                let (a, b) = if ids[i] <= ids[j] {
+                    (ids[i], ids[j])
+                } else {
+                    (ids[j], ids[i])
+                };
+                stmt.execute(params![a, b, batch_id, ws, &now])?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn row_to_observation(row: &rusqlite::Row<'_>) -> rusqlite::Result<Observation> {
@@ -221,6 +278,7 @@ fn row_to_observation(row: &rusqlite::Row<'_>) -> rusqlite::Result<Observation> 
             .get::<_, Option<String>>(17)?
             .and_then(|s| parse_memory_type(&s)),
         observation_detail_json: row.get(18)?,
+        extraction_batch_id: row.get(19)?,
     })
 }
 

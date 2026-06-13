@@ -80,6 +80,7 @@ fn test_full_pipeline_json_ingest_to_store() {
         extraction_confidence: 0.7,
         memory_type_candidate: None,
         observation_detail_json: None,
+        extraction_batch_id: None,
         evidence_alpha: 1.0,
         evidence_beta: 1.0,
         status: ObservationStatus::Candidate,
@@ -253,6 +254,7 @@ fn test_batch_insert_and_query() {
             extraction_confidence: 0.7,
             memory_type_candidate: None,
             observation_detail_json: None,
+            extraction_batch_id: None,
             evidence_alpha: 1.0,
             evidence_beta: 1.0,
             status: ObservationStatus::Candidate,
@@ -321,6 +323,7 @@ fn test_multiple_stores_share_connection() {
         extraction_confidence: 0.7,
         memory_type_candidate: None,
         observation_detail_json: None,
+        extraction_batch_id: None,
         evidence_alpha: 1.0,
         evidence_beta: 1.0,
         status: ObservationStatus::Candidate,
@@ -334,4 +337,75 @@ fn test_multiple_stores_share_connection() {
     // Both stores read the shared state
     assert_eq!(raw_store.get_by_session("shared_session").unwrap().len(), 1);
     assert_eq!(obs_store.list_by_workspace("ws1", None).unwrap().len(), 1);
+}
+
+/// P2-C: observations sharing an extraction_batch_id are reachable via find_coclaim,
+/// and the coclaim relation does not leak across batches.
+#[test]
+fn test_coclaim_links_same_batch_observations() {
+    let db = Database::open_in_memory().unwrap();
+
+    // Seed raw memories (FK constraint on observation.memory_id).
+    let raws: Vec<RawMemory> = (0..4)
+        .map(|i| RawMemory {
+            memory_id: format!("mem_{i}"),
+            workspace_id: "ws".to_string(),
+            session_id: "s1".to_string(),
+            role: "user".to_string(),
+            content: format!("content {i}"),
+            source_type: SourceType::SessionFile,
+            source_ref: "t".to_string(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+        })
+        .collect();
+    {
+        let conn = db.conn.lock();
+        seed_raw_memories(&conn, &raws);
+    }
+
+    let obs_store = SqliteObservationStore::new(db.conn.clone());
+
+    let mk = |i: usize, batch: Option<&str>| Observation {
+        observation_id: format!("obs_{i}"),
+        workspace_id: "ws".to_string(),
+        memory_id: format!("mem_{i}"),
+        subject_text: format!("entity_{i}"),
+        subject_type: None,
+        predicate: "has_value".to_string(),
+        object_text: Some(format!("value_{i}")),
+        object_type: None,
+        evidence_text: None,
+        extraction_confidence: 0.7,
+        evidence_alpha: 1.0,
+        evidence_beta: 1.0,
+        status: ObservationStatus::Candidate,
+        surprise_score: 0.5,
+        source_type: ObservationSourceType::UserMessage,
+        memory_type_candidate: None,
+        observation_detail_json: None,
+        extraction_batch_id: batch.map(|b| b.to_string()),
+        consolidated: false,
+        created_at: chrono::Utc::now().to_rfc3339(),
+    };
+
+    // Batch A: obs_0, obs_1, obs_2 share a batch. obs_3 sits alone in batch B.
+    let batch = vec![
+        mk(0, Some("batch_a")),
+        mk(1, Some("batch_a")),
+        mk(2, Some("batch_a")),
+        mk(3, Some("batch_b")),
+    ];
+    obs_store.insert_batch(&batch).unwrap();
+
+    // find_coclaim(obs_0) returns the two batch_a siblings, not the batch_b one.
+    let siblings = obs_store.find_coclaim("obs_0").unwrap();
+    let sibling_ids: Vec<&str> = siblings.iter().map(|o| o.observation_id.as_str()).collect();
+    assert_eq!(sibling_ids.len(), 2);
+    assert!(sibling_ids.contains(&"obs_1"));
+    assert!(sibling_ids.contains(&"obs_2"));
+    assert!(!sibling_ids.contains(&"obs_3"));
+
+    // An observation whose batch has no partners returns empty.
+    let lone = obs_store.find_coclaim("obs_3").unwrap();
+    assert!(lone.is_empty());
 }

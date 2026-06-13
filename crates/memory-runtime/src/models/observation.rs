@@ -26,6 +26,10 @@ pub struct Observation {
     pub memory_type_candidate: Option<MemoryType>,
     /// Type-specific structured detail for `memory_type_candidate` (JSON blob).
     pub observation_detail_json: Option<String>,
+    /// P2-C: groups observations produced by a single `extract_observations()` call.
+    /// Enables coclaim co-occurrence queries for clustering (design §5.3). `None` for
+    /// observations inserted individually or migrated from pre-P2-C databases.
+    pub extraction_batch_id: Option<String>,
     pub created_at: String,
 }
 
@@ -163,6 +167,7 @@ mod tests {
             consolidated: false,
             memory_type_candidate: None,
             observation_detail_json: None,
+            extraction_batch_id: None,
             created_at: "t".into(),
         }
     }

@@ -24,6 +24,9 @@ pub trait ObservationStore: Send + Sync {
     fn update_status(&self, observation_id: &str, status: ObservationStatus) -> MemoryResult<()>;
     fn update_confidence(&self, observation_id: &str, alpha: f64, beta: f64) -> MemoryResult<()>;
     fn find_by_entity(&self, entity: &str, workspace_id: &str) -> MemoryResult<Vec<Observation>>;
+    /// P2-C: observations co-claimed with `observation_id` in the same extraction batch.
+    /// Returns siblings reachable via the `observation_coclaim` adjacency table.
+    fn find_coclaim(&self, observation_id: &str) -> MemoryResult<Vec<Observation>>;
     fn check_duplicate(
         &self,
         subject: &str,

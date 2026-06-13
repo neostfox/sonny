@@ -127,12 +127,14 @@ pub async fn extract_observations(
     let total = parsed.observations.len();
     let memory_id = &raw_memories[0].memory_id;
     let workspace_id = &raw_memories[0].workspace_id;
+    // P2-C: one batch id per extraction call groups co-claimed observations.
+    let extraction_batch_id = uuid::Uuid::new_v4().to_string();
 
     let observations: Vec<Observation> = parsed
         .observations
         .into_iter()
         .filter(|raw| evidence_is_supported(raw.evidence_text.as_deref(), raw_memories))
-        .map(|raw| raw_to_observation(raw, memory_id, workspace_id))
+        .map(|raw| raw_to_observation(raw, memory_id, workspace_id, &extraction_batch_id))
         .collect();
 
     let dropped = total - observations.len();
@@ -168,7 +170,12 @@ fn repair_json(raw: &str) -> String {
     s.to_string()
 }
 
-fn raw_to_observation(raw: RawObservation, memory_id: &str, workspace_id: &str) -> Observation {
+fn raw_to_observation(
+    raw: RawObservation,
+    memory_id: &str,
+    workspace_id: &str,
+    extraction_batch_id: &str,
+) -> Observation {
     let source_type = parse_source_type(&raw.source_type);
     Observation {
         observation_id: uuid::Uuid::new_v4().to_string(),
@@ -188,6 +195,7 @@ fn raw_to_observation(raw: RawObservation, memory_id: &str, workspace_id: &str) 
         source_type,
         memory_type_candidate: None,
         observation_detail_json: None,
+        extraction_batch_id: Some(extraction_batch_id.to_string()),
         consolidated: false,
         created_at: chrono::Utc::now().to_rfc3339(),
     }
@@ -324,5 +332,7 @@ mod tests {
         // Hallucinated evidence (not a substring of source) is filtered out.
         assert_eq!(observations.len(), 1);
         assert_eq!(observations[0].subject_text, "posmask");
+        // P2-C: every observation from one extraction call shares a batch id.
+        assert!(observations[0].extraction_batch_id.is_some());
     }
 }

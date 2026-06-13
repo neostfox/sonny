@@ -173,6 +173,7 @@ gantt
 | 文件 | `models/observation.rs`（加字段），新 migration，`concept_store.rs` |
 | 验收 | 来自同一次提取的 Observations 可查询到关联 |
 | 依赖 | P2-A（验证层先就位） |
+| 状态 | ✅ 已完成 (`p2c-observation-cooccurrence`) — `extract_observations()` 每次调用生成一个 `extraction_batch_id` 共享给整批；migration 004 加列 + `observation_coclaim` 关联表（规范 (a,b) 对 + `INSERT OR IGNORE` 幂等）；`insert_batch` 写入共现边；`ObservationStore::find_coclaim()` 查询同批关联。共现查询放在 `observation_store.rs`/`ObservationStore` 而非 `concept_store.rs`（coclaim 是 observation 关系，分层更清晰；P3-B 聚类可直接消费）。47 tests pass，含 coclaim 集成测试 |
 
 ### P2-D: 反向修正机制
 

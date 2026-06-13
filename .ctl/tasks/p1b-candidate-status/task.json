@@ -4,11 +4,11 @@
     "cargo_test"
   ],
   "id": "p1b-candidate-status",
-  "is_archived": false,
+  "is_archived": true,
   "is_held": false,
-  "last_event_seq": 1,
+  "last_event_seq": 8,
   "objective": "ConceptCandidate 独立状态枚举：定义 CandidateStatus 脱离 ObservationStatus",
-  "phase": "planning",
+  "phase": "completed",
   "read_scope": [
     "crates/memory-runtime/src/models/concept.rs",
     "crates/memory-runtime/src/models/status.rs",

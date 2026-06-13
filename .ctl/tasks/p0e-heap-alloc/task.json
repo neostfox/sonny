@@ -4,11 +4,11 @@
     "cargo_test"
   ],
   "id": "p0e-heap-alloc",
-  "is_archived": false,
+  "is_archived": true,
   "is_held": false,
-  "last_event_seq": 1,
+  "last_event_seq": 8,
   "objective": "堆分配优化：Box dyn ToSql 改为 params 宏消除每次 insert 17-23 次堆分配",
-  "phase": "planning",
+  "phase": "completed",
   "read_scope": [
     "crates/memory-runtime/src/store/concept_store.rs",
     "crates/memory-runtime/src/store/observation_store.rs",

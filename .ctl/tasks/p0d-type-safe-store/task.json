@@ -4,11 +4,11 @@
     "cargo_test"
   ],
   "id": "p0d-type-safe-store",
-  "is_archived": false,
+  "is_archived": true,
   "is_held": false,
-  "last_event_seq": 1,
+  "last_event_seq": 8,
   "objective": "Store trait 类型安全：update_status 接受枚举而非裸 str，parse 函数加日志",
-  "phase": "planning",
+  "phase": "completed",
   "read_scope": [
     "crates/memory-runtime/src/store/concept_store.rs",
     "crates/memory-runtime/src/store/observation_store.rs",

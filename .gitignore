@@ -4,6 +4,7 @@
 .runtime/
 .ralph-state.json
 .agents/
+.omp/
 .agent-log
 .session-id
 .plan-log

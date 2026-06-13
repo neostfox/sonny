@@ -1,0 +1,20 @@
+{
+  "schema": "control.run-manifest.v1",
+  "run_id": "9d968afc-9d96-441b-a000-1b9d968a0000",
+  "task_id": "p0b-connection-ownership",
+  "adapter": "omp",
+  "assignment_path": ".trellis/tasks/p0b-connection-ownership/assignment.json",
+  "worktree_path": "C:\\Users\\shaob\\Documents\\sources\\sonny\\.ctl\\tasks\\p0b-connection-ownership\\worktree",
+  "lease_id": "9d96a7e5-9d97-441b-a000-1b9d96a70001",
+  "write_allow": [
+    "crates/memory-runtime/src/store",
+    "crates/memory-runtime/tests",
+    "crates/sonny-cli/src/main.rs"
+  ],
+  "write_deny": [],
+  "gates": [
+    "cargo_check",
+    "cargo_test"
+  ],
+  "created_at": "2026-06-13T07:41:39Z"
+}

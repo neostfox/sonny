@@ -1,0 +1,25 @@
+{
+  "gates": [
+    "cargo_check",
+    "cargo_test"
+  ],
+  "id": "p2b-dedup-normalize",
+  "is_archived": false,
+  "is_held": false,
+  "last_event_seq": 1,
+  "objective": "去重+实体归一化集成到 extract pipeline，extract_session_id 改用 LazyLock Regex",
+  "phase": "planning",
+  "read_scope": [
+    "crates/memory-runtime/src/entity/mod.rs",
+    "crates/memory-runtime/src/pipeline/extract.rs",
+    "crates/memory-runtime/src/pipeline/ingest.rs",
+    "crates/memory-runtime/src/store/traits.rs"
+  ],
+  "risk_triggers": [],
+  "schema": "control.task-view.v1",
+  "write_allow": [
+    "crates/memory-runtime/src/pipeline/extract.rs",
+    "crates/memory-runtime/src/pipeline/ingest.rs"
+  ],
+  "write_deny": []
+}

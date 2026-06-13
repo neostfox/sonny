@@ -1,0 +1,24 @@
+{
+  "gates": [
+    "cargo_check",
+    "cargo_test"
+  ],
+  "id": "p3a-embedding-impl",
+  "is_archived": false,
+  "is_held": false,
+  "last_event_seq": 1,
+  "objective": "Embedding 实现：实现 EmbeddingService trait，本地 ONNX 模型或 API 调用，512 维向量输出",
+  "phase": "planning",
+  "read_scope": [
+    "crates/memory-runtime/Cargo.toml",
+    "crates/memory-runtime/src/config.rs",
+    "crates/memory-runtime/src/embed/traits.rs"
+  ],
+  "risk_triggers": [],
+  "schema": "control.task-view.v1",
+  "write_allow": [
+    "crates/memory-runtime/Cargo.toml",
+    "crates/memory-runtime/src/embed"
+  ],
+  "write_deny": []
+}

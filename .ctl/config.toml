@@ -1,0 +1,27 @@
+# ctl Control Plane Configuration
+# Customize which decay risks are enabled and their severity.
+
+[risk]
+# Production code decay risks (R1-R6). Set false to disable.
+R1_cognitive_overload = true
+R2_change_propagation = true
+R3_knowledge_duplication = true
+R4_accidental_complexity = true
+R5_dependency_disorder = true
+R6_domain_distortion = true
+
+# Test decay risks (T1-T6). Set false to disable.
+T1_test_obscurity = true
+T2_test_brittleness = true
+T3_test_duplication = true
+T4_mock_abuse = true
+T5_coverage_illusion = true
+T6_architecture_mismatch = true
+
+[severity]
+# Override severity: "critical", "warning", "suggestion"
+# R1 = "warning"
+
+[scope]
+# Glob patterns to exclude from analysis
+# ignore = ["**/*.generated.*", "**/vendor/**"]

@@ -1,0 +1,25 @@
+{
+  "gates": [
+    "cargo_check",
+    "cargo_test"
+  ],
+  "id": "p0e-heap-alloc",
+  "is_archived": false,
+  "is_held": false,
+  "last_event_seq": 1,
+  "objective": "堆分配优化：Box dyn ToSql 改为 params 宏消除每次 insert 17-23 次堆分配",
+  "phase": "planning",
+  "read_scope": [
+    "crates/memory-runtime/src/store/concept_store.rs",
+    "crates/memory-runtime/src/store/observation_store.rs",
+    "crates/memory-runtime/src/store/raw_memory_store.rs"
+  ],
+  "risk_triggers": [],
+  "schema": "control.task-view.v1",
+  "write_allow": [
+    "crates/memory-runtime/src/store/concept_store.rs",
+    "crates/memory-runtime/src/store/observation_store.rs",
+    "crates/memory-runtime/src/store/raw_memory_store.rs"
+  ],
+  "write_deny": []
+}

@@ -1,0 +1,23 @@
+{
+  "gates": [
+    "cargo_check",
+    "cargo_test"
+  ],
+  "id": "p0a-windows-compat",
+  "is_archived": true,
+  "is_held": false,
+  "last_event_seq": 11,
+  "objective": "修复 config.rs dirs_home() 在 Windows 上使用不存在的 HOME 变量",
+  "phase": "completed",
+  "read_scope": [
+    "crates/memory-runtime/Cargo.toml",
+    "crates/memory-runtime/src/config.rs"
+  ],
+  "risk_triggers": [],
+  "schema": "control.task-view.v1",
+  "write_allow": [
+    "crates/memory-runtime/Cargo.toml",
+    "crates/memory-runtime/src/config.rs"
+  ],
+  "write_deny": []
+}

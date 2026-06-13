@@ -1,0 +1,25 @@
+{
+  "gates": [
+    "cargo_check",
+    "cargo_test"
+  ],
+  "id": "p0d-type-safe-store",
+  "is_archived": false,
+  "is_held": false,
+  "last_event_seq": 1,
+  "objective": "Store trait 类型安全：update_status 接受枚举而非裸 str，parse 函数加日志",
+  "phase": "planning",
+  "read_scope": [
+    "crates/memory-runtime/src/store/concept_store.rs",
+    "crates/memory-runtime/src/store/observation_store.rs",
+    "crates/memory-runtime/src/store/traits.rs"
+  ],
+  "risk_triggers": [],
+  "schema": "control.task-view.v1",
+  "write_allow": [
+    "crates/memory-runtime/src/store/concept_store.rs",
+    "crates/memory-runtime/src/store/observation_store.rs",
+    "crates/memory-runtime/src/store/traits.rs"
+  ],
+  "write_deny": []
+}

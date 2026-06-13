@@ -1,0 +1,20 @@
+{
+  "gates": [
+    "cargo_check"
+  ],
+  "id": "test-boundary",
+  "is_archived": false,
+  "is_held": false,
+  "last_event_seq": 4,
+  "objective": "Test boundary injection",
+  "phase": "cancelled",
+  "read_scope": [
+    "crates/memory-runtime/src/models"
+  ],
+  "risk_triggers": [],
+  "schema": "control.task-view.v1",
+  "write_allow": [
+    "crates/memory-runtime/src/models/observation.rs"
+  ],
+  "write_deny": []
+}

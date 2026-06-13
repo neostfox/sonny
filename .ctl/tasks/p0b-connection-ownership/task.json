@@ -1,0 +1,25 @@
+{
+  "gates": [
+    "cargo_check",
+    "cargo_test"
+  ],
+  "id": "p0b-connection-ownership",
+  "is_archived": false,
+  "is_held": false,
+  "last_event_seq": 1,
+  "objective": "连接所有权模型重构：Database 持有 Arc Mutex Connection 实现 store 共享",
+  "phase": "planning",
+  "read_scope": [
+    "crates/memory-runtime/src/store",
+    "crates/memory-runtime/tests",
+    "crates/sonny-cli/src/main.rs"
+  ],
+  "risk_triggers": [],
+  "schema": "control.task-view.v1",
+  "write_allow": [
+    "crates/memory-runtime/src/store",
+    "crates/memory-runtime/tests",
+    "crates/sonny-cli/src/main.rs"
+  ],
+  "write_deny": []
+}

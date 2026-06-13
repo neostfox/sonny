@@ -1,0 +1,27 @@
+{
+  "gates": [
+    "cargo_check",
+    "cargo_test"
+  ],
+  "id": "p4b-feedback-system",
+  "is_archived": false,
+  "is_held": false,
+  "last_event_seq": 1,
+  "objective": "Feedback 系统：新增 feedback 表，反馈分类 Confirm/Negate/Supplement/Correct，触发 confidence 更新和 rejected_hypothesis 生成",
+  "phase": "planning",
+  "read_scope": [
+    "crates/memory-runtime/src/confidence/mod.rs",
+    "crates/memory-runtime/src/feedback",
+    "crates/memory-runtime/src/migrations",
+    "crates/memory-runtime/src/models/feedback.rs",
+    "crates/memory-runtime/src/store"
+  ],
+  "risk_triggers": [],
+  "schema": "control.task-view.v1",
+  "write_allow": [
+    "crates/memory-runtime/src/feedback",
+    "crates/memory-runtime/src/migrations",
+    "crates/memory-runtime/src/store"
+  ],
+  "write_deny": []
+}

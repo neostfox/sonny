@@ -43,3 +43,6 @@ Cargo.lock
 *.db
 *.db-wal
 *.db-shm
+
+# Control plane: OMP run worktrees (git worktrees, not source)
+.ctl/tasks/*/worktree/

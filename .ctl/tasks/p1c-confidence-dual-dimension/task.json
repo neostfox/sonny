@@ -1,0 +1,23 @@
+{
+  "gates": [
+    "cargo_check"
+  ],
+  "id": "p1c-confidence-dual-dimension",
+  "is_archived": false,
+  "is_held": false,
+  "last_event_seq": 1,
+  "objective": "Confidence 双维度设计：拆分 extraction_confidence 和 fact_confidence，产出设计决策文档",
+  "phase": "planning",
+  "read_scope": [
+    "crates/memory-runtime/src/confidence/mod.rs",
+    "crates/memory-runtime/src/config.rs",
+    "crates/memory-runtime/src/models/observation.rs",
+    "docs/memory-runtime-design.md"
+  ],
+  "risk_triggers": [],
+  "schema": "control.task-view.v1",
+  "write_allow": [
+    "docs/memory-runtime-design.md"
+  ],
+  "write_deny": []
+}

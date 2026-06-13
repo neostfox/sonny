@@ -1,0 +1,25 @@
+{
+  "gates": [
+    "cargo_check",
+    "cargo_test"
+  ],
+  "id": "p4c-time-awareness",
+  "is_archived": false,
+  "is_held": false,
+  "last_event_seq": 1,
+  "objective": "时间感知+衰减：recall 时更新 last_recalled_at，定义衰减公式 0.5^(days/90)，长期未 recall 的 concept 降权",
+  "phase": "planning",
+  "read_scope": [
+    "crates/memory-runtime/src/confidence/mod.rs",
+    "crates/memory-runtime/src/config.rs",
+    "crates/memory-runtime/src/recall",
+    "crates/memory-runtime/src/store/concept_store.rs"
+  ],
+  "risk_triggers": [],
+  "schema": "control.task-view.v1",
+  "write_allow": [
+    "crates/memory-runtime/src/recall",
+    "crates/memory-runtime/src/store/concept_store.rs"
+  ],
+  "write_deny": []
+}

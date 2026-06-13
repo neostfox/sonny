@@ -1,0 +1,24 @@
+{
+  "gates": [
+    "cargo_check",
+    "cargo_test"
+  ],
+  "id": "p3c-merge-split",
+  "is_archived": false,
+  "is_held": false,
+  "last_event_seq": 1,
+  "objective": "Concept 合并/拆分：检测候选间重叠（Jaccard），合并 known_facts，子聚类拆分过宽候选",
+  "phase": "planning",
+  "read_scope": [
+    "crates/memory-runtime/src/models/concept.rs",
+    "crates/memory-runtime/src/pipeline",
+    "crates/memory-runtime/src/store"
+  ],
+  "risk_triggers": [],
+  "schema": "control.task-view.v1",
+  "write_allow": [
+    "crates/memory-runtime/src/pipeline",
+    "crates/memory-runtime/src/store/concept_store.rs"
+  ],
+  "write_deny": []
+}

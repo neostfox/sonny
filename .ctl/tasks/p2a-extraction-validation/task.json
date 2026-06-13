@@ -1,0 +1,23 @@
+{
+  "gates": [
+    "cargo_check",
+    "cargo_test"
+  ],
+  "id": "p2a-extraction-validation",
+  "is_archived": false,
+  "is_held": false,
+  "last_event_seq": 1,
+  "objective": "提取验证层：evidence_text 回验为 RawMemory 子串，confidence 由 source_type 权重覆盖，提取结果带 prompt 版本号",
+  "phase": "planning",
+  "read_scope": [
+    "crates/memory-runtime/src/confidence/mod.rs",
+    "crates/memory-runtime/src/models/observation.rs",
+    "crates/memory-runtime/src/pipeline/extract.rs"
+  ],
+  "risk_triggers": [],
+  "schema": "control.task-view.v1",
+  "write_allow": [
+    "crates/memory-runtime/src/pipeline/extract.rs"
+  ],
+  "write_deny": []
+}

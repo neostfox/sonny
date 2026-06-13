@@ -6,7 +6,6 @@ use memory_runtime::store::connection::Database;
 use memory_runtime::store::observation_store::SqliteObservationStore;
 use memory_runtime::store::raw_memory_store::SqliteRawMemoryStore;
 use memory_runtime::store::traits::{ObservationStore, RawMemoryStore};
-
 #[derive(Parser)]
 #[command(name = "sonny", about = "Memory Runtime for Coding Agents")]
 struct Cli {
@@ -45,43 +44,49 @@ enum Commands {
     },
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     match cli.command {
         Commands::Init => {
-            let db = Database::open(&cli.db).expect("Failed to initialize database");
+            let db = Database::open(&cli.db)?;
             println!("Database initialized at {}", cli.db.display());
             drop(db);
         }
         Commands::IngestSession { path, workspace } => {
-            let content = std::fs::read_to_string(&path).expect("Failed to read session file");
-            let filename = path.file_name().unwrap().to_string_lossy().to_string();
+            let content = std::fs::read_to_string(&path)?;
+            let filename = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown")
+                .to_string();
             let source_ref = path.to_string_lossy().to_string();
 
-            let memories = detect_and_parse(&content, &filename, &workspace, &source_ref)
-                .expect("Failed to parse session");
+            let memories = detect_and_parse(&content, &filename, &workspace, &source_ref)?;
 
-            let db = Database::open(&cli.db).expect("Failed to open database");
+            let db = Database::open(&cli.db)?;
             let store = SqliteRawMemoryStore::new(db.conn.clone());
 
             let count = memories.len();
-            for m in &memories {
-                store.insert(m).expect("Failed to insert raw memory");
-            }
+            store.insert_batch(&memories)?;
             println!("Ingested {count} raw memory records from {filename}");
         }
         Commands::ListObservations { status, workspace } => {
-            let db = Database::open(&cli.db).expect("Failed to open database");
+            let db = Database::open(&cli.db)?;
             let store = SqliteObservationStore::new(db.conn.clone());
 
-            let observations = store
-                .list_by_workspace(&workspace, status.as_deref())
-                .expect("Failed to list observations");
+            let status_enum = status.as_deref().and_then(|s| s.parse().ok());
+
+            if status.is_some() && status_enum.is_none() {
+                eprintln!("Invalid status. Valid values: candidate, fast_stored, confirmed, auto_confirmed, rejected, deprecated, disputed, orphan");
+                std::process::exit(1);
+            }
+
+            let observations = store.list_by_workspace(&workspace, status_enum)?;
 
             if observations.is_empty() {
                 println!("No observations found.");
-                return;
+                return Ok(());
             }
 
             for obs in &observations {
@@ -102,4 +107,6 @@ fn main() {
             println!("\n{} observation(s)", observations.len());
         }
     }
+
+    Ok(())
 }

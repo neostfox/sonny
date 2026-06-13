@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::status::{ConceptStatus, ObservationStatus};
+use super::status::{CandidateStatus, ConceptStatus};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConceptCandidate {
@@ -19,7 +19,7 @@ pub struct ConceptCandidate {
     pub confidence: f64,
     pub evidence_alpha: f64,
     pub evidence_beta: f64,
-    pub status: ObservationStatus,
+    pub status: CandidateStatus,
     pub last_recalled_at: Option<String>,
     pub recall_count: i64,
     pub successful_recall_count: i64,
@@ -48,6 +48,20 @@ impl ConceptType {
             Self::DataAsset => "data_asset",
             Self::TaskState => "task_state",
             Self::Preference => "preference",
+        }
+    }
+}
+impl std::str::FromStr for ConceptType {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "architecture" => Ok(Self::Architecture),
+            "bug_fix" => Ok(Self::BugFix),
+            "troubleshooting" => Ok(Self::Troubleshooting),
+            "data_asset" => Ok(Self::DataAsset),
+            "task_state" => Ok(Self::TaskState),
+            "preference" => Ok(Self::Preference),
+            _ => Err(()),
         }
     }
 }

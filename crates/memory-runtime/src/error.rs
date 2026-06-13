@@ -21,9 +21,6 @@ pub enum MemoryError {
     #[error("Clustering error: {0}")]
     Clustering(String),
 
-    #[error("Entity not found: {entity_id}")]
-    EntityNotFound { entity_id: String },
-
     #[error("Concept not found: {concept_id}")]
     ConceptNotFound { concept_id: String },
 

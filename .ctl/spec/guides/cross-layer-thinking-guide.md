@@ -94,10 +94,9 @@ Checklist:
 
 1. Create new migration `migrations/NNN_name.sql` with next version number
 2. Add to `MIGRATIONS` array in `migration.rs`
-3. Update `CURRENT_VERSION` constant
-4. Update store implementation if columns changed
-5. Update model struct if fields changed
-6. Run `cargo test` to verify migration from scratch
+3. Update store implementation if columns changed
+4. Update model struct if fields changed
+5. Run `cargo test` to verify migration from scratch
 
 Checklist:
 - [ ] Migration is idempotent (`CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`)

@@ -2,8 +2,6 @@ use rusqlite::Connection;
 
 use crate::error::MemoryResult;
 
-const CURRENT_VERSION: u32 = 2;
-
 const MIGRATIONS: &[(u32, &str)] = &[
     (1, include_str!("../migrations/001_initial.sql")),
     (2, include_str!("../migrations/002_entity_concept.sql")),
@@ -37,6 +35,10 @@ mod tests {
         let version: u32 = conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, CURRENT_VERSION);
+        let latest = MIGRATIONS
+            .last()
+            .map(|(v, _)| *v)
+            .expect("MIGRATIONS must contain at least one migration");
+        assert_eq!(version, latest);
     }
 }

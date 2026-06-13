@@ -1,11 +1,12 @@
 use parking_lot::Mutex;
 use std::sync::Arc;
+use std::sync::LazyLock;
 
-use rusqlite::{params, params_from_iter, Connection};
+use rusqlite::{params, Connection};
 
 use crate::error::MemoryResult;
 use crate::models::concept::{Concept, ConceptCandidate, ConceptType};
-use crate::models::status::{ConceptStatus, ObservationStatus};
+use crate::models::status::{CandidateStatus, ConceptStatus};
 
 use super::traits::ConceptStore;
 
@@ -32,88 +33,68 @@ const CONCEPT_COLUMNS: &str = "\
     last_recalled_at, recall_count, successful_recall_count, failed_recall_count, \
     connection_count, created_at, updated_at";
 
-fn candidate_params(c: &ConceptCandidate) -> Vec<Box<dyn rusqlite::ToSql>> {
-    vec![
-        Box::new(c.candidate_id.clone()),
-        Box::new(c.workspace_id.clone()),
-        Box::new(c.name.clone()),
-        Box::new(c.summary.clone()),
-        Box::new(c.source_terms_json.clone()),
-        Box::new(c.source_sessions_json.clone()),
-        Box::new(c.source_observations_json.clone()),
-        Box::new(c.known_facts_json.clone()),
-        Box::new(c.rejected_hypotheses_json.clone()),
-        Box::new(c.open_questions_json.clone()),
-        Box::new(c.evidence_json.clone()),
-        Box::new(c.evidence_count),
-        Box::new(c.confidence),
-        Box::new(c.evidence_alpha),
-        Box::new(c.evidence_beta),
-        Box::new(c.status.as_str().to_string()),
-        Box::new(c.last_recalled_at.clone()),
-        Box::new(c.recall_count),
-        Box::new(c.successful_recall_count),
-        Box::new(c.failed_recall_count),
-        Box::new(c.created_at.clone()),
-        Box::new(c.updated_at.clone()),
-    ]
-}
-
-fn concept_params(c: &Concept) -> Vec<Box<dyn rusqlite::ToSql>> {
-    vec![
-        Box::new(c.concept_id.clone()),
-        Box::new(c.workspace_id.clone()),
-        Box::new(c.name.clone()),
-        Box::new(c.concept_type.as_ref().map(|t| t.as_str().to_string())),
-        Box::new(c.definition.clone()),
-        Box::new(c.related_entities_json.clone()),
-        Box::new(c.known_facts_json.clone()),
-        Box::new(c.rejected_hypotheses_json.clone()),
-        Box::new(c.open_questions_json.clone()),
-        Box::new(c.evidence_json.clone()),
-        Box::new(c.confidence),
-        Box::new(c.evidence_alpha),
-        Box::new(c.evidence_beta),
-        Box::new(c.status.as_str().to_string()),
-        Box::new(c.parent_concept_id.clone()),
-        Box::new(c.hierarchy_depth),
-        Box::new(c.last_recalled_at.clone()),
-        Box::new(c.recall_count),
-        Box::new(c.successful_recall_count),
-        Box::new(c.failed_recall_count),
-        Box::new(c.connection_count),
-        Box::new(c.created_at.clone()),
-        Box::new(c.updated_at.clone()),
-    ]
-}
+static CANDIDATE_INSERT: LazyLock<String> = LazyLock::new(|| {
+    format!("INSERT INTO concept_candidate ({CANDIDATE_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)")
+});
+static CANDIDATE_GET: LazyLock<String> = LazyLock::new(|| {
+    format!("SELECT {CANDIDATE_COLUMNS} FROM concept_candidate WHERE candidate_id = ?1")
+});
+static CANDIDATE_LIST: LazyLock<String> = LazyLock::new(|| {
+    format!("SELECT {CANDIDATE_COLUMNS} FROM concept_candidate WHERE workspace_id = ?1 AND (?2 IS NULL OR status = ?2) ORDER BY created_at DESC")
+});
+static CONCEPT_INSERT: LazyLock<String> = LazyLock::new(|| {
+    format!("INSERT INTO concept ({CONCEPT_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)")
+});
+static CONCEPT_GET: LazyLock<String> =
+    LazyLock::new(|| format!("SELECT {CONCEPT_COLUMNS} FROM concept WHERE concept_id = ?1"));
+static CONCEPT_LIST: LazyLock<String> = LazyLock::new(|| {
+    format!("SELECT {CONCEPT_COLUMNS} FROM concept WHERE workspace_id = ?1 AND (?2 IS NULL OR status = ?2) ORDER BY created_at DESC")
+});
+static CONCEPT_COLS_QUALIFIED: LazyLock<String> = LazyLock::new(|| {
+    CONCEPT_COLUMNS
+        .split(", ")
+        .map(|c| format!("c.{c}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+});
 
 impl ConceptStore for SqliteConceptStore {
     fn insert_candidate(&self, candidate: &ConceptCandidate) -> MemoryResult<()> {
         let conn = self.conn.lock();
-        let placeholders: Vec<&str> = (1..=22)
-            .map(|i| {
-                static VALS: [&str; 22] = [
-                    "?1", "?2", "?3", "?4", "?5", "?6", "?7", "?8", "?9", "?10", "?11", "?12",
-                    "?13", "?14", "?15", "?16", "?17", "?18", "?19", "?20", "?21", "?22",
-                ];
-                VALS[i - 1]
-            })
-            .collect();
-        let sql = format!(
-            "INSERT INTO concept_candidate ({CANDIDATE_COLUMNS}) VALUES ({})",
-            placeholders.join(", ")
-        );
-        conn.execute(&sql, params_from_iter(candidate_params(candidate)))?;
+        let status = candidate.status.as_str();
+        conn.execute(
+            &CANDIDATE_INSERT,
+            params![
+                &candidate.candidate_id,
+                &candidate.workspace_id,
+                &candidate.name,
+                &candidate.summary,
+                &candidate.source_terms_json,
+                &candidate.source_sessions_json,
+                &candidate.source_observations_json,
+                &candidate.known_facts_json,
+                &candidate.rejected_hypotheses_json,
+                &candidate.open_questions_json,
+                &candidate.evidence_json,
+                &candidate.evidence_count,
+                &candidate.confidence,
+                &candidate.evidence_alpha,
+                &candidate.evidence_beta,
+                &status,
+                &candidate.last_recalled_at,
+                &candidate.recall_count,
+                &candidate.successful_recall_count,
+                &candidate.failed_recall_count,
+                &candidate.created_at,
+                &candidate.updated_at,
+            ],
+        )?;
         Ok(())
     }
 
     fn get_candidate(&self, candidate_id: &str) -> MemoryResult<Option<ConceptCandidate>> {
         let conn = self.conn.lock();
-        let result = conn.query_row(
-            &format!("SELECT {CANDIDATE_COLUMNS} FROM concept_candidate WHERE candidate_id = ?1"),
-            params![candidate_id],
-            row_to_candidate,
-        );
+        let result = conn.query_row(&CANDIDATE_GET, params![candidate_id], row_to_candidate);
         match result {
             Ok(c) => Ok(Some(c)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -124,38 +105,58 @@ impl ConceptStore for SqliteConceptStore {
     fn list_candidates(
         &self,
         workspace_id: &str,
-        status: Option<&str>,
+        status: Option<CandidateStatus>,
     ) -> MemoryResult<Vec<ConceptCandidate>> {
         let conn = self.conn.lock();
-        let result = if let Some(status) = status {
-            let sql = format!("SELECT {CANDIDATE_COLUMNS} FROM concept_candidate WHERE workspace_id = ?1 AND status = ?2 ORDER BY created_at DESC");
-            collect_candidates(&conn, &sql, params![workspace_id, status])?
-        } else {
-            let sql = format!("SELECT {CANDIDATE_COLUMNS} FROM concept_candidate WHERE workspace_id = ?1 ORDER BY created_at DESC");
-            collect_candidates(&conn, &sql, params![workspace_id])?
-        };
+        let s = status.map(|st| st.as_str());
+        let result = map_rows(
+            &conn,
+            &CANDIDATE_LIST,
+            params![workspace_id, s],
+            row_to_candidate,
+        )?;
         Ok(result)
     }
 
     fn insert_concept(&self, concept: &Concept) -> MemoryResult<()> {
         let conn = self.conn.lock();
-        let placeholders: Vec<String> = (1..=23).map(|i| format!("?{i}")).collect();
-        let sql = format!(
-            "INSERT INTO concept ({CONCEPT_COLUMNS}) VALUES ({})",
-            placeholders.join(", ")
-        );
-        conn.execute(&sql, params_from_iter(concept_params(concept)))?;
+        let status = concept.status.as_str();
+        let concept_type = concept.concept_type.as_ref().map(|t| t.as_str());
+        conn.execute(
+            &CONCEPT_INSERT,
+            params![
+                &concept.concept_id,
+                &concept.workspace_id,
+                &concept.name,
+                &concept_type,
+                &concept.definition,
+                &concept.related_entities_json,
+                &concept.known_facts_json,
+                &concept.rejected_hypotheses_json,
+                &concept.open_questions_json,
+                &concept.evidence_json,
+                &concept.confidence,
+                &concept.evidence_alpha,
+                &concept.evidence_beta,
+                &status,
+                &concept.parent_concept_id,
+                &concept.hierarchy_depth,
+                &concept.last_recalled_at,
+                &concept.recall_count,
+                &concept.successful_recall_count,
+                &concept.failed_recall_count,
+                &concept.connection_count,
+                &concept.created_at,
+                &concept.updated_at,
+            ],
+        )?;
         sync_entity_concepts(&conn, concept)?;
         Ok(())
     }
 
     fn get_concept(&self, concept_id: &str) -> MemoryResult<Option<Concept>> {
         let conn = self.conn.lock();
-        let result = conn.query_row(
-            &format!("SELECT {CONCEPT_COLUMNS} FROM concept WHERE concept_id = ?1"),
-            params![concept_id],
-            row_to_concept,
-        );
+        let result = conn.query_row(&CONCEPT_GET, params![concept_id], row_to_concept);
         match result {
             Ok(c) => Ok(Some(c)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -166,16 +167,16 @@ impl ConceptStore for SqliteConceptStore {
     fn list_concepts(
         &self,
         workspace_id: &str,
-        status: Option<&str>,
+        status: Option<ConceptStatus>,
     ) -> MemoryResult<Vec<Concept>> {
         let conn = self.conn.lock();
-        let result = if let Some(status) = status {
-            let sql = format!("SELECT {CONCEPT_COLUMNS} FROM concept WHERE workspace_id = ?1 AND status = ?2 ORDER BY created_at DESC");
-            collect_concepts(&conn, &sql, params![workspace_id, status])?
-        } else {
-            let sql = format!("SELECT {CONCEPT_COLUMNS} FROM concept WHERE workspace_id = ?1 ORDER BY created_at DESC");
-            collect_concepts(&conn, &sql, params![workspace_id])?
-        };
+        let s = status.map(|st| st.as_str());
+        let result = map_rows(
+            &conn,
+            &CONCEPT_LIST,
+            params![workspace_id, s],
+            row_to_concept,
+        )?;
         Ok(result)
     }
 
@@ -213,7 +214,7 @@ impl ConceptStore for SqliteConceptStore {
         if entities.is_empty() {
             return Ok(vec![]);
         }
-        let cols = concept_cols_qualified();
+        let cols = &*CONCEPT_COLS_QUALIFIED;
         let placeholders: Vec<String> =
             (0..entities.len()).map(|i| format!("?{}", i + 3)).collect();
         // Exact-match JOIN replaces substring LIKE on related_entities_json,
@@ -225,56 +226,36 @@ impl ConceptStore for SqliteConceptStore {
              ORDER BY c.confidence DESC",
             placeholders.join(", ")
         );
-        let mut p: Vec<Box<dyn rusqlite::ToSql>> = vec![
-            Box::new(workspace_id.to_string()),
-            Box::new("active".to_string()),
-        ];
-        for e in entities {
-            p.push(Box::new(e.clone()));
-        }
-        let param_refs: Vec<&dyn rusqlite::ToSql> = p.iter().map(|x| x.as_ref()).collect();
-        let result = collect_concepts(&conn, &sql, &param_refs)?;
-        Ok(result)
+        let active = ConceptStatus::Active.as_str();
+        let params = rusqlite::params_from_iter(
+            [workspace_id, active]
+                .into_iter()
+                .chain(entities.iter().map(String::as_str)),
+        );
+        map_rows(&conn, &sql, params, row_to_concept)
     }
 
     fn update_recall_stats(&self, concept_id: &str, success: bool) -> MemoryResult<()> {
         let conn = self.conn.lock();
         let now = chrono::Utc::now().to_rfc3339();
-        if success {
-            conn.execute(
-                "UPDATE concept SET last_recalled_at = ?1, recall_count = recall_count + 1, successful_recall_count = successful_recall_count + 1, updated_at = ?1 WHERE concept_id = ?2",
-                params![&now, concept_id],
-            )?;
+        let sql = if success {
+            "UPDATE concept SET last_recalled_at = ?1, recall_count = recall_count + 1, successful_recall_count = successful_recall_count + 1, updated_at = ?1 WHERE concept_id = ?2"
         } else {
-            conn.execute(
-                "UPDATE concept SET last_recalled_at = ?1, recall_count = recall_count + 1, failed_recall_count = failed_recall_count + 1, updated_at = ?1 WHERE concept_id = ?2",
-                params![&now, concept_id],
-            )?;
-        }
+            "UPDATE concept SET last_recalled_at = ?1, recall_count = recall_count + 1, failed_recall_count = failed_recall_count + 1, updated_at = ?1 WHERE concept_id = ?2"
+        };
+        conn.execute(sql, params![&now, concept_id])?;
         Ok(())
     }
 }
 
-fn collect_candidates(
-    conn: &Connection,
-    sql: &str,
-    p: &[&dyn rusqlite::ToSql],
-) -> MemoryResult<Vec<ConceptCandidate>> {
+fn map_rows<T, P, F>(conn: &Connection, sql: &str, params: P, map: F) -> MemoryResult<Vec<T>>
+where
+    P: rusqlite::Params,
+    F: FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<T>,
+{
     let mut stmt = conn.prepare(sql)?;
-    let rows: Vec<ConceptCandidate> = stmt
-        .query_map(p, row_to_candidate)?
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(rows)
-}
-
-fn collect_concepts(
-    conn: &Connection,
-    sql: &str,
-    p: &[&dyn rusqlite::ToSql],
-) -> MemoryResult<Vec<Concept>> {
-    let mut stmt = conn.prepare(sql)?;
-    let rows: Vec<Concept> = stmt
-        .query_map(p, row_to_concept)?
+    let rows = stmt
+        .query_map(params, map)?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
 }
@@ -296,7 +277,7 @@ fn row_to_candidate(row: &rusqlite::Row<'_>) -> rusqlite::Result<ConceptCandidat
         confidence: row.get(12)?,
         evidence_alpha: row.get(13)?,
         evidence_beta: row.get(14)?,
-        status: parse_obs_status(&row.get::<_, String>(15)?),
+        status: parse_candidate_status(&row.get::<_, String>(15)?),
         last_recalled_at: row.get(16)?,
         recall_count: row.get(17)?,
         successful_recall_count: row.get(18)?,
@@ -313,7 +294,7 @@ fn row_to_concept(row: &rusqlite::Row<'_>) -> rusqlite::Result<Concept> {
         name: row.get(2)?,
         concept_type: row
             .get::<_, Option<String>>(3)?
-            .map(|s| parse_concept_type(&s)),
+            .and_then(|s| parse_concept_type(&s)),
         definition: row.get(4)?,
         related_entities_json: row.get(5)?,
         known_facts_json: row.get(6)?,
@@ -336,50 +317,28 @@ fn row_to_concept(row: &rusqlite::Row<'_>) -> rusqlite::Result<Concept> {
     })
 }
 
-fn parse_obs_status(s: &str) -> ObservationStatus {
-    match s {
-        "candidate" => ObservationStatus::Candidate,
-        "fast_stored" => ObservationStatus::FastStored,
-        "confirmed" => ObservationStatus::Confirmed,
-        "auto_confirmed" => ObservationStatus::AutoConfirmed,
-        "rejected" => ObservationStatus::Rejected,
-        "deprecated" => ObservationStatus::Deprecated,
-        "disputed" => ObservationStatus::Disputed,
-        "orphan" => ObservationStatus::Orphan,
-        _ => ObservationStatus::Candidate,
-    }
+fn parse_candidate_status(s: &str) -> CandidateStatus {
+    s.parse().unwrap_or_else(|_| {
+        tracing::warn!("Unknown candidate status '{s}', defaulting to candidate");
+        CandidateStatus::Candidate
+    })
 }
 
 fn parse_concept_status(s: &str) -> ConceptStatus {
-    match s {
-        "candidate" => ConceptStatus::Candidate,
-        "active" => ConceptStatus::Active,
-        "labile" => ConceptStatus::Labile,
-        "deprecated" => ConceptStatus::Deprecated,
-        "disputed" => ConceptStatus::Disputed,
-        _ => ConceptStatus::Candidate,
-    }
+    s.parse().unwrap_or_else(|_| {
+        tracing::warn!("Unknown concept status '{s}', defaulting to candidate");
+        ConceptStatus::Candidate
+    })
 }
 
-fn parse_concept_type(s: &str) -> ConceptType {
-    match s {
-        "architecture" => ConceptType::Architecture,
-        "bug_fix" => ConceptType::BugFix,
-        "troubleshooting" => ConceptType::Troubleshooting,
-        "data_asset" => ConceptType::DataAsset,
-        "task_state" => ConceptType::TaskState,
-        "preference" => ConceptType::Preference,
-        _ => ConceptType::Architecture,
+fn parse_concept_type(s: &str) -> Option<ConceptType> {
+    match s.parse::<ConceptType>() {
+        Ok(t) => Some(t),
+        Err(_) => {
+            tracing::warn!("Unknown concept type '{s}', defaulting to none");
+            None
+        }
     }
-}
-
-/// Concept columns qualified with the `c.` alias for JOIN queries.
-fn concept_cols_qualified() -> String {
-    CONCEPT_COLUMNS
-        .split(", ")
-        .map(|c| format!("c.{c}"))
-        .collect::<Vec<_>>()
-        .join(", ")
 }
 
 /// Parse a concept's `related_entities_json` into entity strings.
@@ -493,5 +452,62 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[test]
+    fn concept_full_field_round_trip() {
+        // Locks the column-positional binding: CONCEPT_COLUMNS order must match the
+        // params! order and row_to_concept indices. Any reorder silently corrupts data.
+        let db = Database::open_in_memory().unwrap();
+        let store = SqliteConceptStore::new(db.conn.clone());
+
+        let concept = Concept {
+            concept_id: "rt1".into(),
+            workspace_id: "ws".into(),
+            name: "Round Trip Concept".into(),
+            concept_type: Some(ConceptType::DataAsset),
+            definition: Some("a definition".into()),
+            related_entities_json: Some(serde_json::to_string(&["e1", "e2"]).unwrap()),
+            known_facts_json: Some(serde_json::to_string(&["fact"]).unwrap()),
+            rejected_hypotheses_json: Some(serde_json::to_string(&["rej"]).unwrap()),
+            open_questions_json: Some(serde_json::to_string(&["q"]).unwrap()),
+            evidence_json: Some(serde_json::to_string(&["ev"]).unwrap()),
+            confidence: 0.42,
+            evidence_alpha: 3.0,
+            evidence_beta: 4.0,
+            status: ConceptStatus::Labile,
+            parent_concept_id: Some("parent".into()),
+            hierarchy_depth: 2,
+            last_recalled_at: Some("2026-01-01T00:00:00Z".into()),
+            recall_count: 5,
+            successful_recall_count: 3,
+            failed_recall_count: 2,
+            connection_count: 7,
+            created_at: "2026-06-01T00:00:00Z".into(),
+            updated_at: "2026-06-02T00:00:00Z".into(),
+        };
+
+        store.insert_concept(&concept).unwrap();
+        let got = store
+            .get_concept("rt1")
+            .unwrap()
+            .expect("concept should exist");
+
+        assert_eq!(got.name, "Round Trip Concept");
+        assert_eq!(got.concept_type, Some(ConceptType::DataAsset));
+        assert_eq!(got.definition.as_deref(), Some("a definition"));
+        assert_eq!(got.related_entities_json, concept.related_entities_json);
+        assert_eq!(got.known_facts_json, concept.known_facts_json);
+        assert_eq!(got.evidence_json, concept.evidence_json);
+        assert_eq!(got.confidence, 0.42);
+        assert_eq!(got.evidence_alpha, 3.0);
+        assert_eq!(got.evidence_beta, 4.0);
+        assert_eq!(got.status, ConceptStatus::Labile);
+        assert_eq!(got.parent_concept_id.as_deref(), Some("parent"));
+        assert_eq!(got.hierarchy_depth, 2);
+        assert_eq!(got.recall_count, 5);
+        assert_eq!(got.successful_recall_count, 3);
+        assert_eq!(got.failed_recall_count, 2);
+        assert_eq!(got.connection_count, 7);
     }
 }

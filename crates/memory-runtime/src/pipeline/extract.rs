@@ -98,7 +98,7 @@ fn default_confidence() -> f64 {
 
 pub async fn extract_observations(
     raw_memories: &[RawMemory],
-    llm: &(impl LlmProvider + Sync),
+    llm: &impl LlmProvider,
 ) -> MemoryResult<Vec<Observation>> {
     if raw_memories.is_empty() {
         return Ok(vec![]);
@@ -174,14 +174,10 @@ fn raw_to_observation(raw: RawObservation, memory_id: &str, workspace_id: &str) 
 }
 
 fn parse_source_type(s: &str) -> ObservationSourceType {
-    match s {
-        "user_message" => ObservationSourceType::UserMessage,
-        "user_confirm" => ObservationSourceType::UserConfirm,
-        "user_negation" => ObservationSourceType::UserNegation,
-        "assistant_guess" => ObservationSourceType::AssistantGuess,
-        "file_evidence" => ObservationSourceType::FileEvidence,
-        _ => ObservationSourceType::AssistantGuess,
-    }
+    s.parse().unwrap_or_else(|_| {
+        tracing::warn!("Unknown observation source type '{s}', defaulting to assistant_guess");
+        ObservationSourceType::AssistantGuess
+    })
 }
 
 #[cfg(test)]

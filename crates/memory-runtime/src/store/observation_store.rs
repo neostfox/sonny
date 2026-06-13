@@ -1,7 +1,8 @@
 use parking_lot::Mutex;
 use std::sync::Arc;
+use std::sync::LazyLock;
 
-use rusqlite::{params, params_from_iter, Connection};
+use rusqlite::{params, Connection};
 
 use crate::error::MemoryResult;
 use crate::models::observation::{Observation, ObservationSourceType};
@@ -24,45 +25,77 @@ const OBS_COLUMNS: &str = "\
     predicate, object_text, object_type, evidence_text, confidence, evidence_alpha, evidence_beta, \
     status, surprise_score, source_type, consolidated, created_at";
 
-fn obs_params(obs: &Observation) -> Vec<Box<dyn rusqlite::ToSql>> {
-    vec![
-        Box::new(obs.observation_id.clone()),
-        Box::new(obs.workspace_id.clone()),
-        Box::new(obs.memory_id.clone()),
-        Box::new(obs.subject_text.clone()),
-        Box::new(obs.subject_type.clone()),
-        Box::new(obs.predicate.clone()),
-        Box::new(obs.object_text.clone()),
-        Box::new(obs.object_type.clone()),
-        Box::new(obs.evidence_text.clone()),
-        Box::new(obs.confidence),
-        Box::new(obs.evidence_alpha),
-        Box::new(obs.evidence_beta),
-        Box::new(obs.status.as_str().to_string()),
-        Box::new(obs.surprise_score),
-        Box::new(obs.source_type.as_str().to_string()),
-        Box::new(obs.consolidated),
-        Box::new(obs.created_at.clone()),
-    ]
-}
+static OBS_INSERT: LazyLock<String> = LazyLock::new(|| {
+    format!("INSERT INTO observation ({OBS_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)")
+});
+static OBS_GET: LazyLock<String> =
+    LazyLock::new(|| format!("SELECT {OBS_COLUMNS} FROM observation WHERE observation_id = ?1"));
+static OBS_LIST: LazyLock<String> = LazyLock::new(|| {
+    format!("SELECT {OBS_COLUMNS} FROM observation WHERE workspace_id = ?1 AND (?2 IS NULL OR status = ?2) ORDER BY created_at DESC")
+});
+static OBS_FIND_BY_ENTITY: LazyLock<String> = LazyLock::new(|| {
+    format!("SELECT {OBS_COLUMNS} FROM observation WHERE workspace_id = ?1 AND (subject_text = ?2 OR object_text = ?2) ORDER BY created_at DESC")
+});
 
 impl ObservationStore for SqliteObservationStore {
     fn insert(&self, obs: &Observation) -> MemoryResult<()> {
         let conn = self.conn.lock();
+        let status = obs.status.as_str();
+        let source = obs.source_type.as_str();
         conn.execute(
-            &format!("INSERT INTO observation ({OBS_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)"),
-            params_from_iter(obs_params(obs)),
+            &OBS_INSERT,
+            params![
+                &obs.observation_id,
+                &obs.workspace_id,
+                &obs.memory_id,
+                &obs.subject_text,
+                &obs.subject_type,
+                &obs.predicate,
+                &obs.object_text,
+                &obs.object_type,
+                &obs.evidence_text,
+                &obs.confidence,
+                &obs.evidence_alpha,
+                &obs.evidence_beta,
+                &status,
+                &obs.surprise_score,
+                &source,
+                &obs.consolidated,
+                &obs.created_at,
+            ],
         )?;
         Ok(())
     }
-
     fn insert_batch(&self, observations: &[Observation]) -> MemoryResult<()> {
-        let conn = self.conn.lock();
-        let tx = conn.unchecked_transaction()?;
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
         {
-            let sql = format!("INSERT INTO observation ({OBS_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)");
+            let sql: &str = &OBS_INSERT;
             for obs in observations {
-                tx.execute(&sql, params_from_iter(obs_params(obs)))?;
+                let status = obs.status.as_str();
+                let source = obs.source_type.as_str();
+                tx.execute(
+                    sql,
+                    params![
+                        &obs.observation_id,
+                        &obs.workspace_id,
+                        &obs.memory_id,
+                        &obs.subject_text,
+                        &obs.subject_type,
+                        &obs.predicate,
+                        &obs.object_text,
+                        &obs.object_type,
+                        &obs.evidence_text,
+                        &obs.confidence,
+                        &obs.evidence_alpha,
+                        &obs.evidence_beta,
+                        &status,
+                        &obs.surprise_score,
+                        &source,
+                        &obs.consolidated,
+                        &obs.created_at,
+                    ],
+                )?;
             }
         }
         tx.commit()?;
@@ -71,11 +104,7 @@ impl ObservationStore for SqliteObservationStore {
 
     fn get(&self, observation_id: &str) -> MemoryResult<Option<Observation>> {
         let conn = self.conn.lock();
-        let result = conn.query_row(
-            &format!("SELECT {OBS_COLUMNS} FROM observation WHERE observation_id = ?1"),
-            [observation_id],
-            row_to_observation,
-        );
+        let result = conn.query_row(&OBS_GET, [observation_id], row_to_observation);
         match result {
             Ok(obs) => Ok(Some(obs)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -86,24 +115,19 @@ impl ObservationStore for SqliteObservationStore {
     fn list_by_workspace(
         &self,
         workspace_id: &str,
-        status: Option<&str>,
+        status: Option<ObservationStatus>,
     ) -> MemoryResult<Vec<Observation>> {
         let conn = self.conn.lock();
-        let result = if let Some(status) = status {
-            let sql = format!("SELECT {OBS_COLUMNS} FROM observation WHERE workspace_id = ?1 AND status = ?2 ORDER BY created_at DESC");
-            collect_rows(&conn, &sql, params![workspace_id, status])?
-        } else {
-            let sql = format!("SELECT {OBS_COLUMNS} FROM observation WHERE workspace_id = ?1 ORDER BY created_at DESC");
-            collect_rows(&conn, &sql, params![workspace_id])?
-        };
+        let s = status.map(|st| st.as_str());
+        let result = collect_rows(&conn, &OBS_LIST, params![workspace_id, s])?;
         Ok(result)
     }
-
-    fn update_status(&self, observation_id: &str, status: &str) -> MemoryResult<()> {
+    fn update_status(&self, observation_id: &str, status: ObservationStatus) -> MemoryResult<()> {
         let conn = self.conn.lock();
+        let s = status.as_str();
         let changed = conn.execute(
             "UPDATE observation SET status = ?1 WHERE observation_id = ?2",
-            params![status, observation_id],
+            params![s, observation_id],
         )?;
         if changed == 0 {
             return Err(crate::error::MemoryError::ObservationNotFound {
@@ -130,10 +154,7 @@ impl ObservationStore for SqliteObservationStore {
 
     fn find_by_entity(&self, entity: &str, workspace_id: &str) -> MemoryResult<Vec<Observation>> {
         let conn = self.conn.lock();
-        let sql = format!(
-            "SELECT {OBS_COLUMNS} FROM observation WHERE workspace_id = ?1 AND (subject_text = ?2 OR object_text = ?2) ORDER BY created_at DESC"
-        );
-        Ok(collect_rows(&conn, &sql, params![workspace_id, entity])?)
+        collect_rows(&conn, &OBS_FIND_BY_ENTITY, params![workspace_id, entity])
     }
 
     fn check_duplicate(
@@ -196,26 +217,15 @@ fn row_to_observation(row: &rusqlite::Row<'_>) -> rusqlite::Result<Observation> 
 }
 
 fn parse_observation_status(s: &str) -> ObservationStatus {
-    match s {
-        "candidate" => ObservationStatus::Candidate,
-        "fast_stored" => ObservationStatus::FastStored,
-        "confirmed" => ObservationStatus::Confirmed,
-        "auto_confirmed" => ObservationStatus::AutoConfirmed,
-        "rejected" => ObservationStatus::Rejected,
-        "deprecated" => ObservationStatus::Deprecated,
-        "disputed" => ObservationStatus::Disputed,
-        "orphan" => ObservationStatus::Orphan,
-        _ => ObservationStatus::Candidate,
-    }
+    s.parse().unwrap_or_else(|_| {
+        tracing::warn!("Unknown observation status '{s}', defaulting to candidate");
+        ObservationStatus::Candidate
+    })
 }
 
 fn parse_observation_source_type(s: &str) -> ObservationSourceType {
-    match s {
-        "user_message" => ObservationSourceType::UserMessage,
-        "user_confirm" => ObservationSourceType::UserConfirm,
-        "user_negation" => ObservationSourceType::UserNegation,
-        "assistant_guess" => ObservationSourceType::AssistantGuess,
-        "file_evidence" => ObservationSourceType::FileEvidence,
-        _ => ObservationSourceType::AssistantGuess,
-    }
+    s.parse().unwrap_or_else(|_| {
+        tracing::warn!("Unknown observation source type '{s}', defaulting to assistant_guess");
+        ObservationSourceType::AssistantGuess
+    })
 }

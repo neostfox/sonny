@@ -44,3 +44,16 @@ impl ObservationSourceType {
         }
     }
 }
+impl std::str::FromStr for ObservationSourceType {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "user_message" => Ok(Self::UserMessage),
+            "user_confirm" => Ok(Self::UserConfirm),
+            "user_negation" => Ok(Self::UserNegation),
+            "assistant_guess" => Ok(Self::AssistantGuess),
+            "file_evidence" => Ok(Self::FileEvidence),
+            _ => Err(()),
+        }
+    }
+}

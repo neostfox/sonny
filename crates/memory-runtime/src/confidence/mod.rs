@@ -2,8 +2,8 @@ use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct BetaConfidence {
-    pub alpha: f32,
-    pub beta: f32,
+    pub alpha: f64,
+    pub beta: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -19,9 +19,12 @@ pub enum EvidenceType {
     ConflictingEvidence,
     RecallCorrected,
     InternalConflict,
-    LongInactivity,
     AssistantSpeculation,
 }
+/// Number of `EvidenceType` variants. Bump when adding a variant, then register its weight in
+/// `EVIDENCE_WEIGHTS` — `all_evidence_types_have_weights` enforces full coverage.
+#[cfg(test)]
+const EVIDENCE_TYPE_VARIANT_COUNT: usize = 12;
 
 impl fmt::Display for EvidenceType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -37,13 +40,12 @@ impl fmt::Display for EvidenceType {
             Self::ConflictingEvidence => write!(f, "conflicting_evidence"),
             Self::RecallCorrected => write!(f, "recall_corrected"),
             Self::InternalConflict => write!(f, "internal_conflict"),
-            Self::LongInactivity => write!(f, "long_inactivity"),
             Self::AssistantSpeculation => write!(f, "assistant_speculation"),
         }
     }
 }
 
-const EVIDENCE_WEIGHTS: [(EvidenceType, f32, f32); 13] = [
+const EVIDENCE_WEIGHTS: [(EvidenceType, f64, f64); 12] = [
     (EvidenceType::UserConfirmation, 2.0, 0.0),
     (EvidenceType::FileEvidence, 1.5, 0.0),
     (EvidenceType::RepeatedOccurrence, 1.0, 0.0),
@@ -55,11 +57,10 @@ const EVIDENCE_WEIGHTS: [(EvidenceType, f32, f32); 13] = [
     (EvidenceType::ConflictingEvidence, 0.0, 2.0),
     (EvidenceType::RecallCorrected, 0.0, 1.5),
     (EvidenceType::InternalConflict, 0.0, 1.0),
-    (EvidenceType::LongInactivity, 0.0, 0.5), // caller must scale by days/30
     (EvidenceType::AssistantSpeculation, 0.0, 0.0),
 ];
 
-fn get_weight(evidence_type: &EvidenceType) -> (f32, f32) {
+fn get_weight(evidence_type: &EvidenceType) -> (f64, f64) {
     EVIDENCE_WEIGHTS
         .iter()
         .find(|(et, _, _)| et == evidence_type)
@@ -75,11 +76,11 @@ impl BetaConfidence {
         }
     }
 
-    pub fn with_values(alpha: f32, beta: f32) -> Self {
+    pub fn with_values(alpha: f64, beta: f64) -> Self {
         Self { alpha, beta }
     }
 
-    pub fn confidence(&self) -> f32 {
+    pub fn confidence(&self) -> f64 {
         self.alpha / (self.alpha + self.beta)
     }
 
@@ -90,7 +91,7 @@ impl BetaConfidence {
     }
 
     pub fn update_with_decay(&mut self, days_inactive: u32) {
-        let scale = days_inactive as f32 / 30.0;
+        let scale = days_inactive as f64 / 30.0;
         self.beta += 0.5 * scale;
     }
 }
@@ -124,7 +125,7 @@ mod tests {
         let bc = BetaConfidence::new();
         assert_eq!(bc.alpha, 1.0);
         assert_eq!(bc.beta, 1.0);
-        assert!((bc.confidence() - 0.5).abs() < f32::EPSILON);
+        assert!((bc.confidence() - 0.5).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -185,10 +186,18 @@ mod tests {
 
     #[test]
     fn all_evidence_types_have_weights() {
-        for (_, a, b) in EVIDENCE_WEIGHTS {
-            // At least one of alpha_delta or beta_delta should be 0 for pure types
-            // (except assistant_speculation which has both 0)
-            let _ = (a, b); // verify they compile and are accessible
+        // Every EvidenceType variant MUST be registered exactly once.
+        let mut seen = std::collections::HashSet::new();
+        for (et, _, _) in EVIDENCE_WEIGHTS {
+            assert!(
+                seen.insert(et),
+                "duplicate EvidenceType in EVIDENCE_WEIGHTS: {et}"
+            );
         }
+        assert_eq!(
+            seen.len(),
+            EVIDENCE_TYPE_VARIANT_COUNT,
+            "EVIDENCE_WEIGHTS must cover every EvidenceType variant"
+        );
     }
 }

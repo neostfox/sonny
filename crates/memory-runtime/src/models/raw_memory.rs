@@ -33,3 +33,16 @@ impl SourceType {
         }
     }
 }
+impl std::str::FromStr for SourceType {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "session_file" => Ok(Self::SessionFile),
+            "trellis_journal" => Ok(Self::TrellisJournal),
+            "trellis_task" => Ok(Self::TrellisTask),
+            "user_input" => Ok(Self::UserInput),
+            "manual" => Ok(Self::Manual),
+            _ => Err(()),
+        }
+    }
+}

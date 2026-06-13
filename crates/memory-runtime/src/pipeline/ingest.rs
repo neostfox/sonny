@@ -34,17 +34,15 @@ impl SessionParser for TrellisJournalParser {
             // Session header: ## Session N: Title
             if trimmed.starts_with("## Session ") {
                 // Flush previous section
-                if !content_buffer.trim().is_empty() && !current_session_id.is_empty() {
-                    memories.push(make_raw_memory(
-                        &current_session_id,
-                        &current_date,
-                        &current_section,
-                        &content_buffer,
-                        workspace_id,
-                        source_ref,
-                    ));
-                    content_buffer.clear();
-                }
+                flush_section(
+                    &mut memories,
+                    &current_session_id,
+                    &current_date,
+                    &current_section,
+                    &mut content_buffer,
+                    workspace_id,
+                    source_ref,
+                );
 
                 // Extract session info
                 let header = trimmed.trim_start_matches('#').trim();
@@ -58,17 +56,15 @@ impl SessionParser for TrellisJournalParser {
 
             // Sub-heading: ### Summary, ### Main Changes, etc.
             if trimmed.starts_with("### ") {
-                if !content_buffer.trim().is_empty() && !current_session_id.is_empty() {
-                    memories.push(make_raw_memory(
-                        &current_session_id,
-                        &current_date,
-                        &current_section,
-                        &content_buffer,
-                        workspace_id,
-                        source_ref,
-                    ));
-                    content_buffer.clear();
-                }
+                flush_section(
+                    &mut memories,
+                    &current_session_id,
+                    &current_date,
+                    &current_section,
+                    &mut content_buffer,
+                    workspace_id,
+                    source_ref,
+                );
                 current_section = trimmed.trim_start_matches('#').trim().to_lowercase();
                 continue;
             }
@@ -84,17 +80,15 @@ impl SessionParser for TrellisJournalParser {
 
             // Horizontal rule: --- (session separator)
             if trimmed == "---" {
-                if !content_buffer.trim().is_empty() && !current_session_id.is_empty() {
-                    memories.push(make_raw_memory(
-                        &current_session_id,
-                        &current_date,
-                        &current_section,
-                        &content_buffer,
-                        workspace_id,
-                        source_ref,
-                    ));
-                    content_buffer.clear();
-                }
+                flush_section(
+                    &mut memories,
+                    &current_session_id,
+                    &current_date,
+                    &current_section,
+                    &mut content_buffer,
+                    workspace_id,
+                    source_ref,
+                );
                 continue;
             }
 
@@ -106,16 +100,15 @@ impl SessionParser for TrellisJournalParser {
         }
 
         // Flush final section
-        if !content_buffer.trim().is_empty() && !current_session_id.is_empty() {
-            memories.push(make_raw_memory(
-                &current_session_id,
-                &current_date,
-                &current_section,
-                &content_buffer,
-                workspace_id,
-                source_ref,
-            ));
-        }
+        flush_section(
+            &mut memories,
+            &current_session_id,
+            &current_date,
+            &current_section,
+            &mut content_buffer,
+            workspace_id,
+            source_ref,
+        );
 
         Ok(memories)
     }
@@ -123,6 +116,30 @@ impl SessionParser for TrellisJournalParser {
     fn can_parse(&self, content: &str, filename: &str) -> bool {
         content.starts_with("# Journal") || filename.contains(".trellis/workspace/")
     }
+}
+
+/// Push the buffered section as a `RawMemory` if it is non-empty and a session is active.
+fn flush_section(
+    memories: &mut Vec<RawMemory>,
+    session_id: &str,
+    date: &str,
+    section: &str,
+    buffer: &mut String,
+    workspace_id: &str,
+    source_ref: &str,
+) {
+    if buffer.trim().is_empty() || session_id.is_empty() {
+        return;
+    }
+    memories.push(make_raw_memory(
+        session_id,
+        date,
+        section,
+        buffer,
+        workspace_id,
+        source_ref,
+    ));
+    buffer.clear();
 }
 
 pub struct JsonSessionParser;

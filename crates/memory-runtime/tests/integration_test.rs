@@ -112,7 +112,7 @@ fn test_full_pipeline_json_ingest_to_store() {
 #[test]
 fn test_confidence_integration() {
     let mut bc = BetaConfidence::new();
-    assert!((bc.confidence() - 0.5).abs() < f32::EPSILON);
+    assert!((bc.confidence() - 0.5).abs() < f64::EPSILON);
 
     bc.update(&EvidenceType::UserConfirmation);
     assert!(bc.confidence() > 0.5);

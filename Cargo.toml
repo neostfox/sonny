@@ -21,3 +21,4 @@ strsim = "0.11"
 pulldown-cmark = "0.13"
 regex = "1"
 clap = { version = "4", features = ["derive"] }
+dirs = "6"

@@ -58,9 +58,7 @@ impl Settings {
     pub fn load() -> Self {
         let data_dir = std::env::var("SONNY_DATA_DIR")
             .map(PathBuf::from)
-            .unwrap_or_else(|_| {
-                dirs_home().join(".sonny")
-            });
+            .unwrap_or_else(|_| dirs_home().join(".sonny"));
 
         let db_path = data_dir.join("memory.db");
         let model_dir = data_dir.join("models");
@@ -89,10 +87,8 @@ impl LlmConfig {
         Self {
             api_url: std::env::var("SONNY_LLM_API_URL")
                 .unwrap_or_else(|_| "https://api.openai.com/v1".into()),
-            api_key: std::env::var("SONNY_LLM_API_KEY")
-                .unwrap_or_default(),
-            model: std::env::var("SONNY_LLM_MODEL")
-                .unwrap_or_else(|_| "gpt-4o-mini".into()),
+            api_key: std::env::var("SONNY_LLM_API_KEY").unwrap_or_default(),
+            model: std::env::var("SONNY_LLM_MODEL").unwrap_or_else(|_| "gpt-4o-mini".into()),
             max_tokens: 4096,
             timeout_secs: 60,
         }
@@ -145,7 +141,23 @@ impl ConfidenceConfig {
 }
 
 fn dirs_home() -> PathBuf {
-    std::env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("/tmp"))
+    dirs::home_dir().unwrap_or_else(std::env::temp_dir)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dirs_home_resolves_existing_directory() {
+        let home = dirs_home();
+        assert!(
+            home.is_absolute(),
+            "home dir should be absolute, got {home:?}"
+        );
+        assert!(
+            home.exists(),
+            "home dir should exist on this platform, got {home:?}"
+        );
+    }
 }

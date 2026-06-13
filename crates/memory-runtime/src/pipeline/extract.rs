@@ -1,10 +1,16 @@
 use serde::Deserialize;
 
+use crate::entity::canonical_key_light;
 use crate::error::{MemoryError, MemoryResult};
 use crate::llm::traits::LlmProvider;
 use crate::models::observation::{Observation, ObservationSourceType};
 use crate::models::raw_memory::RawMemory;
 use crate::models::status::ObservationStatus;
+use crate::store::traits::ObservationStore;
+
+/// Prompt version stamped on every extraction. Bump when EXTRACTION_SYSTEM_PROMPT changes;
+/// consumed by P2-D reverse-correction to detect stale extractions needing re-extraction.
+pub const EXTRACTION_PROMPT_VERSION: &str = "2026-06-13.v1";
 
 const EXTRACTION_SYSTEM_PROMPT: &str = r#"You are an observation extraction system. Your task is to extract structured knowledge observations from conversation messages.
 
@@ -32,8 +38,7 @@ Output a JSON object with this structure:
       "object_text": "target entity or value",
       "object_type": "target type or null",
       "evidence_text": "exact verbatim quote",
-      "source_type": "user_message | user_confirm | user_negation | assistant_guess | file_evidence",
-      "confidence": 0.0-1.0
+      "source_type": "user_message | user_confirm | user_negation | assistant_guess | file_evidence"
     }
   ]
 }
@@ -60,7 +65,7 @@ Input:
 [user]: POSMASK 表没有机器字段
 
 Output:
-{"observations":[{"subject_text":"POSMASK","subject_type":"database_table","predicate":"not_has_field","object_text":"机器字段","object_type":"field","evidence_text":"POSMASK 表没有机器字段","source_type":"user_message","confidence":0.9}]}
+{"observations":[{"subject_text":"POSMASK","subject_type":"database_table","predicate":"not_has_field","object_text":"机器字段","object_type":"field","evidence_text":"POSMASK 表没有机器字段","source_type":"user_message"}]}
 
 Input:
 [user]: 好的，谢谢
@@ -88,12 +93,15 @@ struct RawObservation {
     #[serde(default)]
     evidence_text: Option<String>,
     source_type: String,
-    #[serde(default = "default_confidence")]
-    confidence: f64,
 }
 
-fn default_confidence() -> f64 {
-    0.5
+/// Anti-hallucination gate: an observation's evidence_text must be a non-empty verbatim
+/// substring of at least one source RawMemory, otherwise it is dropped (design §2.4).
+fn evidence_is_supported(evidence: Option<&str>, raw_memories: &[RawMemory]) -> bool {
+    match evidence {
+        Some(ev) if !ev.is_empty() => raw_memories.iter().any(|m| m.content.contains(ev)),
+        _ => false,
+    }
 }
 
 pub async fn extract_observations(
@@ -116,14 +124,23 @@ pub async fn extract_observations(
             raw: response.clone(),
         })?;
 
+    let total = parsed.observations.len();
     let memory_id = &raw_memories[0].memory_id;
     let workspace_id = &raw_memories[0].workspace_id;
 
     let observations: Vec<Observation> = parsed
         .observations
         .into_iter()
+        .filter(|raw| evidence_is_supported(raw.evidence_text.as_deref(), raw_memories))
         .map(|raw| raw_to_observation(raw, memory_id, workspace_id))
         .collect();
+
+    let dropped = total - observations.len();
+    if dropped > 0 {
+        tracing::warn!(
+            "extraction validation dropped {dropped} observation(s) with unsupported evidence_text (prompt {EXTRACTION_PROMPT_VERSION})"
+        );
+    }
 
     Ok(observations)
 }
@@ -152,25 +169,59 @@ fn repair_json(raw: &str) -> String {
 }
 
 fn raw_to_observation(raw: RawObservation, memory_id: &str, workspace_id: &str) -> Observation {
+    let source_type = parse_source_type(&raw.source_type);
     Observation {
         observation_id: uuid::Uuid::new_v4().to_string(),
         workspace_id: workspace_id.to_string(),
         memory_id: memory_id.to_string(),
-        subject_text: raw.subject_text,
+        subject_text: canonical_key_light(&raw.subject_text),
         subject_type: raw.subject_type,
         predicate: raw.predicate,
-        object_text: raw.object_text,
+        object_text: raw.object_text.map(|o| canonical_key_light(&o)),
         object_type: raw.object_type,
         evidence_text: raw.evidence_text,
-        confidence: raw.confidence,
+        extraction_confidence: source_type.extraction_confidence(),
         evidence_alpha: 1.0,
         evidence_beta: 1.0,
         status: ObservationStatus::Candidate,
         surprise_score: 0.5,
-        source_type: parse_source_type(&raw.source_type),
+        source_type,
+        memory_type_candidate: None,
+        observation_detail_json: None,
         consolidated: false,
         created_at: chrono::Utc::now().to_rfc3339(),
     }
+}
+
+/// Extract observations and drop any already present in the store (matched by
+/// normalized subject + predicate + object). Caller inserts the returned batch.
+pub async fn extract_and_dedup<S: ObservationStore>(
+    raw_memories: &[RawMemory],
+    llm: &impl LlmProvider,
+    store: &S,
+) -> MemoryResult<Vec<Observation>> {
+    let extracted = extract_observations(raw_memories, llm).await?;
+    let mut kept = Vec::with_capacity(extracted.len());
+    let mut duplicates = 0;
+    for obs in extracted {
+        let is_dup = store.check_duplicate(
+            &obs.subject_text,
+            &obs.predicate,
+            obs.object_text.as_deref(),
+            &obs.workspace_id,
+        )?;
+        if is_dup {
+            duplicates += 1;
+        } else {
+            kept.push(obs);
+        }
+    }
+    if duplicates > 0 {
+        tracing::info!(
+            "dedup dropped {duplicates} duplicate observation(s) against existing store"
+        );
+    }
+    Ok(kept)
 }
 
 fn parse_source_type(s: &str) -> ObservationSourceType {
@@ -226,5 +277,52 @@ mod tests {
         }];
         let result = format_messages(&memories);
         assert!(result.contains("[user]: Hello"));
+    }
+
+    /// Local mock LLM — avoids the two-versions-of-memory_runtime conflict that the
+    /// memory_test_fixtures mock triggers inside lib unit tests.
+    struct EchoLlm {
+        response: String,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::llm::traits::LlmProvider for EchoLlm {
+        async fn complete(&self, _prompt: &str, _system: Option<&str>) -> MemoryResult<String> {
+            Ok(self.response.clone())
+        }
+        async fn health_check(&self) -> MemoryResult<bool> {
+            Ok(true)
+        }
+        fn name(&self) -> &str {
+            "echo"
+        }
+    }
+
+    #[tokio::test]
+    async fn extract_drops_observations_with_unsupported_evidence() {
+        // LLM returns one grounded observation and one hallucinated (evidence not in source).
+        let mock = EchoLlm {
+            response: r#"{"observations":[
+                {"subject_text":"POSMASK","predicate":"not_has_field","object_text":"机器字段","evidence_text":"POSMASK 表没有机器字段","source_type":"user_message"},
+                {"subject_text":"ORDERHDR","predicate":"has_field","object_text":"金额","evidence_text":"ORDERHDR 表里有金额字段","source_type":"user_message"}
+            ]}"#
+                .into(),
+        };
+
+        let raw = RawMemory {
+            memory_id: "m1".into(),
+            workspace_id: "ws".into(),
+            session_id: "s1".into(),
+            role: "user".into(),
+            content: "POSMASK 表没有机器字段".into(),
+            source_type: crate::models::raw_memory::SourceType::SessionFile,
+            source_ref: "t.json".into(),
+            created_at: "2026-01-01".into(),
+        };
+        let observations = extract_observations(&[raw], &mock).await.unwrap();
+
+        // Hallucinated evidence (not a substring of source) is filtered out.
+        assert_eq!(observations.len(), 1);
+        assert_eq!(observations[0].subject_text, "posmask");
     }
 }

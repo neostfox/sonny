@@ -112,6 +112,7 @@ gantt
 | 决策标准 | 如果 session 级蒸馏（P10/D10）需要产出结构化记忆，保留。如果聚类可以直接基于 Observation，删除 |
 | 影响文件 | 设计文档 §4.3, §16; `models/memory_item.rs`; `migrations/001_initial.sql` |
 | 依赖 | 无 |
+| 状态 | ✅ 已完成 (`p1a-memory-item-decision`) — 决策：删除 MemoryItem 独立实体，9 种类型折叠为 `Observation.memory_type_candidate` |
 
 ### P1-B: ConceptCandidate 独立状态枚举
 
@@ -122,6 +123,7 @@ gantt
 | 文件 | `models/status.rs`, `models/concept.rs`, `concept_store.rs` |
 | 验收 | Candidate 状态转换与 Observation 完全独立 |
 | 依赖 | 无 |
+| 状态 | ✅ 已完成 (`p1b-candidate-status`) — CandidateStatus 枚举独立于 ObservationStatus |
 
 ### P1-C: Confidence 双维度设计
 
@@ -132,6 +134,7 @@ gantt
 | 影响 | Observation 模型、extract pipeline、recall 排序 |
 | 产出 | 设计决策文档 + 模型变更方案 |
 | 依赖 | 无 |
+| 状态 | ✅ 已完成 (`p1c-confidence-dual-dimension`) — 决策：`extraction_confidence`（source_type 固定）× `fact_confidence`（Beta 后验）= `effective_confidence` |
 
 ---
 
@@ -148,6 +151,7 @@ gantt
 | 文件 | `pipeline/extract.rs` 新增 `validate_extraction()` 函数 |
 | 验收 | 幻觉 Observation 被过滤；test: 构造 LLM 返回不存在的 evidence_text，验证被拒绝 |
 | 依赖 | P1-C（confidence 双维度） |
+| 状态 | ✅ 已完成 (`p2a-extraction-validation`) — evidence_text 子串回验过滤幻觉 + `EXTRACTION_PROMPT_VERSION`；"confidence 由 source_type 覆盖" 已在 p1d 完成。44 tests pass |
 
 ### P2-B: 去重 + 实体归一化集成
 
@@ -158,6 +162,7 @@ gantt
 | 文件 | `pipeline/extract.rs`, `pipeline/ingest.rs` |
 | 验收 | 同一 session ingest 两次不产生重复；同一实体不同表述归一化为同一 key |
 | 依赖 | P0-D（store trait 改为接受枚举） |
+| 状态 | ✅ 已完成 (`p2b-dedup-normalize`) — `canonical_key_light` 轻量归一（不剥后缀，UserService≠UserModel）+ `extract_and_dedup` + LazyLock session regex。46 tests pass |
 
 ### P2-C: Observation 共现关系
 

@@ -5,6 +5,7 @@ use crate::error::MemoryResult;
 const MIGRATIONS: &[(u32, &str)] = &[
     (1, include_str!("../migrations/001_initial.sql")),
     (2, include_str!("../migrations/002_entity_concept.sql")),
+    (3, include_str!("../migrations/003_p1_model_alignment.sql")),
 ];
 
 pub fn run_migrations(conn: &Connection) -> MemoryResult<()> {

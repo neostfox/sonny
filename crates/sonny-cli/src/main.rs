@@ -91,12 +91,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             for obs in &observations {
                 println!(
-                    "[{}] {} {} {} (confidence: {:.2}, source: {})",
+                    "[{}] {} {} {} (eff. confidence: {:.2}, source: {})",
                     obs.status.as_str(),
                     obs.subject_text,
                     obs.predicate,
                     obs.object_text.as_deref().unwrap_or("-"),
-                    obs.confidence,
+                    obs.effective_confidence(),
                     obs.source_type.as_str(),
                 );
                 if let Some(evidence) = &obs.evidence_text {

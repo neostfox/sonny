@@ -225,8 +225,7 @@ fn make_raw_memory(
 }
 
 fn extract_session_id(header: &str) -> Option<String> {
-    let re = Regex::new(r"(?i)^session\s+(\d+)").ok()?;
-    let caps = re.captures(header)?;
+    let caps = SESSION_ID_REGEX.captures(header)?;
     Some(format!("session_{}", caps.get(1)?.as_str()))
 }
 
@@ -247,6 +246,8 @@ use std::sync::LazyLock;
 
 static KEY_VALUE_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^\*\*(\w+)\*\*:\s*(.+)$").unwrap());
+static SESSION_ID_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)^session\s+(\d+)").unwrap());
 
 #[cfg(test)]
 mod tests {

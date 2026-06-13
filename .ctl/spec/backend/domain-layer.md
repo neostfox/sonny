@@ -74,6 +74,8 @@ All entity IDs are `String` (UUID v4), generated at creation time. No auto-incre
 
 设计文档 §5.6 定义了升权/降权条件。数学模型在 `confidence/mod.rs`，但当前所有 confidence 字段停留在初始值 `(1.0, 1.0)`。
 
+**决策 (2026-06-13, p1c)**: Observation 的 confidence 拆为双维度：`extraction_confidence`（提取时由 source_type 固定，不可变）与 `fact_confidence`（上述 Beta 后验）。recall 排序用 `effective_confidence = extraction_confidence × fact_confidence`。Concept/Candidate 无 extraction 维度，只用 `fact_confidence`。
+
 ## Design Gaps
 
 ### D2: Observation 三元组无法承载设计要求的丰富语义
@@ -124,7 +126,7 @@ Observation → MemoryItem → ConceptCandidate → Concept
 - `migrations/001_initial.sql`: memory_item 表存在
 - 无 store trait、无 pipeline stage、无代码读写
 
-**决策待定**: 保留 MemoryItem 并实现完整 pipeline stage？还是让 Observation 直接聚类成 ConceptCandidate，从设计文档删除 MemoryItem？
+**决策 (2026-06-13, p1a)**: 删除 MemoryItem 独立实体。`MemoryType` 枚举保留，迁移为 Observation 的 `memory_type_candidate: Option<MemoryType>` 字段（配合 `observation_detail_json`）。聚类直接基于 Observation（P3-B）。依据：MemoryItem 无任何 store/pipeline 调用（死代码）；设计 §5 核心生长流程 Cluster 阶段以 Observation 为输入；增加中转层违反 YAGNI 与"概念生长为核心"原则。代码删除为后续实现任务。
 
 ### D4: ConceptCandidate 复用 ObservationStatus
 

@@ -1,0 +1,39 @@
+{
+  "all_gates_pass": true,
+  "completion_interlock": {
+    "all_gates_pass": true,
+    "no_hold": true,
+    "no_rejected_evidence": true,
+    "phase_is_review": false,
+    "verdict": "completed"
+  },
+  "evidence_accepted": 0,
+  "evidence_rejected": 0,
+  "gates": [
+    {
+      "checked_at": "2026-06-13T14:53:23Z",
+      "evidence": "exit=0 cargo check -p memory-runtime -p sonny-cli",
+      "gate_id": "cargo_check",
+      "passed": true
+    },
+    {
+      "checked_at": "2026-06-13T14:53:23Z",
+      "evidence": "exit=0 cargo test -p memory-runtime: 44 passed (3 suites), incl. new hallucination-filter test",
+      "gate_id": "cargo_test",
+      "passed": true
+    }
+  ],
+  "is_archived": true,
+  "is_held": false,
+  "last_seq": 8,
+  "objective": "提取验证层：evidence_text 回验为 RawMemory 子串，confidence 由 source_type 权重覆盖，提取结果带 prompt 版本号",
+  "phase": "completed",
+  "schema": "control.audit-report.v1",
+  "task_id": "p2a-extraction-validation",
+  "total_events": 8,
+  "violations": 0,
+  "write_deny": [],
+  "write_scope": [
+    "crates/memory-runtime/src/pipeline/extract.rs"
+  ]
+}

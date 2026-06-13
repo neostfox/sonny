@@ -283,10 +283,18 @@ Observation 是从 Raw Memory 中提取出的事实片段。
   "predicate": "not_has_field",
   "object": "MACHINE",
   "evidence_text": "POSMASK 没有机器字段",
-  "confidence": 0.92,
+  "extraction_confidence": 0.70,
+  "fact_confidence": 0.92,
   "status": "candidate"
 }
 ```
+
+Observation 的 confidence 分两个独立维度：
+
+- `extraction_confidence`：提取时由 `source_type` 决定的来源可信度，提取后固定不变（FileEvidence 0.9、UserConfirm 0.85、UserNegation 0.8、UserMessage 0.7、AssistantGuess 0.3）。
+- `fact_confidence`：由证据累积的 Beta 分布后验（`evidence_alpha / (evidence_alpha + evidence_beta)`），随反馈和时间动态更新。
+
+召回排序使用 `effective_confidence = extraction_confidence × fact_confidence`：来源不可信的推测即使被反复"未纠正"也无法累积到高置信，来源可信但被证据反驳的事实也会被压低。
 
 Observation 可以表达：
 
@@ -302,9 +310,11 @@ A 是 Bug 根因
 A 是架构事实
 ```
 
-### 4.3 Memory Item
+### 4.3 Memory Type（Observation 属性）
 
-Memory Item 是可长期使用的记忆单元。
+记忆类型不作为独立实体持久化，也没有独立的 pipeline 中转层。每条 Observation 在提取时通过 `memory_type_candidate` 字段标注所属类型，类型特定的结构化细节存入 `observation_detail_json`。
+
+概念生长直接基于 Observation 聚类（Observe → Extract → Cluster），不经过独立的 Memory Item 阶段。
 
 类型包括：
 
@@ -322,7 +332,7 @@ project_context_memory
 
 ### 4.4 Concept Candidate
 
-Concept Candidate 是从一组 Observation 和 Memory Item 中生长出的候选概念。
+Concept Candidate 是从一组 Observation 中生长出的候选概念。
 
 示例：
 
@@ -507,9 +517,9 @@ FP 系统数据治理与排产逻辑
 
 ### 5.6 Validate
 
-根据证据提升或降低置信度。
+根据证据提升或降低 `fact_confidence`。`extraction_confidence` 在提取时由 `source_type` 固定，Validate 阶段不修改。
 
-升权条件：
+升权条件（增加 `evidence_alpha`）：
 
 ```text
 用户确认
@@ -519,7 +529,7 @@ FP 系统数据治理与排产逻辑
 人工 review 确认
 ```
 
-降权条件：
+降权条件（增加 `evidence_beta`）：
 
 ```text
 用户否定
@@ -528,6 +538,8 @@ FP 系统数据治理与排产逻辑
 被标记过期
 只来自助手推测
 ```
+
+Concept 与 ConceptCandidate 没有 extraction 维度（它们不是被提取的，而是从 Observation 生长出来的），只使用 `fact_confidence`。
 
 ### 5.7 Promote
 
@@ -573,6 +585,8 @@ Concept Candidate 满足条件后升级为 Concept。
 ---
 
 ## 6. 记忆类型定义
+
+下列各类型的 JSON 形状描述 Observation 在该 `memory_type_candidate` 下的 `observation_detail_json` 结构，不是独立持久化实体。
 
 ### 6.1 Architecture Memory
 
@@ -746,7 +760,6 @@ Observe → Extract → Cluster → Name → Link → Validate → Promote → U
 ```text
 RawMemory
 Observation
-MemoryItem
 ConceptCandidate
 Concept
 MemoryContext
@@ -888,32 +901,20 @@ CREATE TABLE observation (
     object_text     TEXT,
     object_type     TEXT,
     evidence_text   TEXT,
-    confidence      REAL DEFAULT 0.5,
+    memory_type_candidate   TEXT,
+    observation_detail_json TEXT,
+    extraction_confidence  REAL NOT NULL DEFAULT 0.5,
+    evidence_alpha         REAL NOT NULL DEFAULT 1.0,
+    evidence_beta          REAL NOT NULL DEFAULT 1.0,
     status          TEXT DEFAULT 'candidate',
     created_at      TEXT,
     metadata_json   TEXT
 );
 ```
 
-### 10.3 memory_item
+### 10.3 memory_item（已移除）
 
-```sql
-CREATE TABLE memory_item (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    memory_item_id  TEXT UNIQUE NOT NULL,
-    workspace_id    TEXT,
-    memory_type     TEXT NOT NULL,
-    title           TEXT,
-    content         TEXT NOT NULL,
-    entities_json   TEXT,
-    relations_json  TEXT,
-    evidence_json   TEXT,
-    confidence      REAL DEFAULT 0.5,
-    status          TEXT DEFAULT 'candidate',
-    created_at      TEXT,
-    updated_at      TEXT
-);
-```
+独立的 `memory_item` 表移除。记忆类型作为 Observation 的属性持久化：`observation.memory_type_candidate` 标注类型，`observation.observation_detail_json` 存储类型特定结构。参见 §4.3 与 §10.2。
 
 ### 10.4 concept_candidate
 
@@ -1086,7 +1087,7 @@ Bug 修复路径
 
 ### 12.3 Concept Candidate Builder
 
-任务：从 Observation 和 Memory Item 中生成候选概念。
+任务：从 Observation 中生成候选概念。
 
 候选概念必须包括：
 
@@ -1140,6 +1141,8 @@ Recall 的目标不是"找相似文本"，而是：
 最近任务状态
 历史 session 证据
 ```
+
+置信度信号使用 `effective_confidence = extraction_confidence × fact_confidence`，防止来源不可信的推测通过反复召回累积到高排序。
 
 ### 13.4 Memory Context 限制
 
@@ -1265,7 +1268,7 @@ You must follow these rules:
 7. Do not inject large raw session history into prompts.
 
 Primary flow:
-RawMemory → Observation → MemoryItem → ConceptCandidate → Concept → MemoryContext
+RawMemory → Observation → ConceptCandidate → Concept → MemoryContext
 
 Primary modules:
 - raw memory store

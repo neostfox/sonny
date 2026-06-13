@@ -1,0 +1,34 @@
+{
+  "gates": [
+    "cargo_check",
+    "cargo_test"
+  ],
+  "id": "p1d-model-alignment",
+  "is_archived": true,
+  "is_held": false,
+  "last_event_seq": 8,
+  "objective": "对齐 Observation 模型至 P1 决策：删除 memory_item 死代码、MemoryType 迁移为 Observation.memory_type_candidate、拆 confidence 为 extraction_confidence + fact/effective 方法",
+  "phase": "completed",
+  "read_scope": [
+    "crates/memory-runtime/src/migrations",
+    "crates/memory-runtime/src/models",
+    "crates/memory-runtime/src/pipeline/extract.rs",
+    "crates/memory-runtime/src/store",
+    "crates/memory-runtime/tests/integration_test.rs",
+    "crates/sonny-cli/src/main.rs"
+  ],
+  "risk_triggers": [],
+  "schema": "control.task-view.v1",
+  "write_allow": [
+    "crates/memory-runtime/src/migrations",
+    "crates/memory-runtime/src/models/memory_item.rs",
+    "crates/memory-runtime/src/models/mod.rs",
+    "crates/memory-runtime/src/models/observation.rs",
+    "crates/memory-runtime/src/pipeline/extract.rs",
+    "crates/memory-runtime/src/store/migration.rs",
+    "crates/memory-runtime/src/store/observation_store.rs",
+    "crates/memory-runtime/tests/integration_test.rs",
+    "crates/sonny-cli/src/main.rs"
+  ],
+  "write_deny": []
+}

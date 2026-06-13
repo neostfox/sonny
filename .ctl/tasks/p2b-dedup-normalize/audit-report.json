@@ -1,0 +1,42 @@
+{
+  "all_gates_pass": true,
+  "completion_interlock": {
+    "all_gates_pass": true,
+    "no_hold": true,
+    "no_rejected_evidence": true,
+    "phase_is_review": false,
+    "verdict": "completed"
+  },
+  "evidence_accepted": 0,
+  "evidence_rejected": 0,
+  "gates": [
+    {
+      "checked_at": "2026-06-13T15:02:26Z",
+      "evidence": "exit=0 cargo check -p memory-runtime -p sonny-cli",
+      "gate_id": "cargo_check",
+      "passed": true
+    },
+    {
+      "checked_at": "2026-06-13T15:02:26Z",
+      "evidence": "exit=0 cargo test -p memory-runtime: 46 passed (3 suites), incl. canonical_key_light + dedup integration tests",
+      "gate_id": "cargo_test",
+      "passed": true
+    }
+  ],
+  "is_archived": true,
+  "is_held": false,
+  "last_seq": 9,
+  "objective": "去重+实体归一化集成到 extract pipeline，extract_session_id 改用 LazyLock Regex",
+  "phase": "completed",
+  "schema": "control.audit-report.v1",
+  "task_id": "p2b-dedup-normalize",
+  "total_events": 9,
+  "violations": 0,
+  "write_deny": [],
+  "write_scope": [
+    "crates/memory-runtime/src/entity/mod.rs",
+    "crates/memory-runtime/src/pipeline/extract.rs",
+    "crates/memory-runtime/src/pipeline/ingest.rs",
+    "crates/memory-runtime/tests/integration_test.rs"
+  ]
+}

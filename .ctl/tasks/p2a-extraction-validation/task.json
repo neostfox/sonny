@@ -4,11 +4,11 @@
     "cargo_test"
   ],
   "id": "p2a-extraction-validation",
-  "is_archived": false,
+  "is_archived": true,
   "is_held": false,
-  "last_event_seq": 1,
+  "last_event_seq": 8,
   "objective": "提取验证层：evidence_text 回验为 RawMemory 子串，confidence 由 source_type 权重覆盖，提取结果带 prompt 版本号",
-  "phase": "planning",
+  "phase": "completed",
   "read_scope": [
     "crates/memory-runtime/src/confidence/mod.rs",
     "crates/memory-runtime/src/models/observation.rs",

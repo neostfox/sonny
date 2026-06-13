@@ -13,19 +13,10 @@ const PASCAL_SUFFIXES: &[&str] = &[
     "Manager", "Handler", "Config",
 ];
 
-pub fn canonical_key(raw: &str) -> String {
-    let s = raw.trim();
-    if s.is_empty() {
-        return s.to_string();
-    }
-
-    // Unicode NFKC normalization
-    use unicode_normalization::UnicodeNormalization;
-    let s: String = s.nfkc().collect();
-
-    // Strip PascalCase suffixes BEFORE lowercasing (e.g., UserModel -> User)
-    let s = strip_pascal_suffixes(&s);
-
+/// Core normalization shared by both canonical forms: lowercase + separator
+/// normalization + underscore collapse + trailing trim. Input is assumed already
+/// NFKC-normalized (and, for the aggressive form, pascal-stripped).
+fn core_normalize(s: &str) -> String {
     // Lowercase (Unicode-aware)
     let s = s.to_lowercase();
 
@@ -51,10 +42,44 @@ pub fn canonical_key(raw: &str) -> String {
     }
 
     // Strip trailing underscores
-    let result = result.trim_end_matches('_').to_string();
+    result.trim_end_matches('_').to_string()
+}
+
+fn nfkc(s: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    s.nfkc().collect()
+}
+
+/// Light entity key: case + separator normalization only. Does NOT strip semantic
+/// suffixes, so "UserService" stays distinct from "UserModel" while "UserModel",
+/// "user_model" and "User Model" all collapse to "user_model".
+pub fn canonical_key_light(raw: &str) -> String {
+    let s = raw.trim();
+    if s.is_empty() {
+        return s.to_string();
+    }
+    core_normalize(&nfkc(s))
+}
+
+/// Aggressive canonical key: also strips semantic suffixes ("UserModel" -> "user",
+/// "user_service" -> "user"). Used for alias matching / clustering where different
+/// surface forms of the same concept must collapse.
+pub fn canonical_key(raw: &str) -> String {
+    let s = raw.trim();
+    if s.is_empty() {
+        return s.to_string();
+    }
+
+    // Unicode NFKC normalization
+    let s = nfkc(s);
+
+    // Strip PascalCase suffixes BEFORE lowercasing (e.g., UserModel -> User)
+    let s = strip_pascal_suffixes(&s);
+
+    let s = core_normalize(&s);
 
     // Strip underscore-separated suffixes (e.g., user_model -> user)
-    strip_underscore_suffixes(&result)
+    strip_underscore_suffixes(&s)
 }
 
 fn strip_pascal_suffixes(s: &str) -> String {
@@ -147,5 +172,23 @@ mod tests {
     fn canonical_key_empty() {
         assert_eq!(canonical_key(""), "");
         assert_eq!(canonical_key("  "), "");
+    }
+
+    #[test]
+    fn canonical_key_light_normalizes_without_stripping_suffixes() {
+        // Case + separator normalization collapses separator spellings ...
+        assert_eq!(canonical_key_light("User Model"), "user_model");
+        assert_eq!(canonical_key_light("user-model"), "user_model");
+        assert_eq!(canonical_key_light("user_model"), "user_model");
+        assert_eq!(canonical_key_light("POSMASK"), "posmask");
+        // ... but semantic suffixes are preserved, so distinct entities stay apart
+        // (unlike aggressive canonical_key which collapses both to "user").
+        assert_eq!(canonical_key_light("UserService"), "userservice");
+        assert_ne!(
+            canonical_key_light("UserService"),
+            canonical_key_light("UserModel")
+        );
+        // Chinese is preserved (lowercase is a no-op for CJK).
+        assert_eq!(canonical_key_light("机器字段"), "机器字段");
     }
 }

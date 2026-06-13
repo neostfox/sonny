@@ -77,7 +77,9 @@ fn test_full_pipeline_json_ingest_to_store() {
         object_text: Some("机器字段".to_string()),
         object_type: Some("field".to_string()),
         evidence_text: Some("POSMASK 表没有机器字段".to_string()),
-        confidence: 0.9,
+        extraction_confidence: 0.7,
+        memory_type_candidate: None,
+        observation_detail_json: None,
         evidence_alpha: 1.0,
         evidence_beta: 1.0,
         status: ObservationStatus::Candidate,
@@ -171,11 +173,45 @@ async fn test_extract_with_mock_llm() {
     let observations = extract_observations(&[raw], &mock).await.unwrap();
 
     assert_eq!(observations.len(), 1);
-    assert_eq!(observations[0].subject_text, "POSMASK");
+    // subject_text normalized via canonical_key_light ("POSMASK" -> "posmask")
+    assert_eq!(observations[0].subject_text, "posmask");
     assert_eq!(observations[0].predicate, "not_has_field");
     assert_eq!(
         observations[0].source_type,
         ObservationSourceType::UserMessage
+    );
+}
+
+#[tokio::test]
+async fn test_extract_and_dedup_filters_duplicates() {
+    use memory_runtime::pipeline::extract::extract_and_dedup;
+    use memory_test_fixtures::mock_llm::MockLlmProvider;
+
+    let db = Database::open_in_memory().unwrap();
+    let raw = make_test_raw_memory("ws", "s1", "user", "POSMASK 表没有机器字段");
+    {
+        let conn = db.conn.lock();
+        seed_raw_memories(&conn, &[raw.clone()]);
+    }
+    let obs_store = SqliteObservationStore::new(db.conn.clone());
+    let mock = MockLlmProvider::new().with_response(
+        "POSMASK",
+        r#"{"observations":[{"subject_text":"POSMASK","predicate":"not_has_field","object_text":"机器字段","evidence_text":"POSMASK 表没有机器字段","source_type":"user_message"}]}"#,
+    );
+
+    // First extraction: store empty -> keeps the observation.
+    let first = extract_and_dedup(&[raw.clone()], &mock, &obs_store)
+        .await
+        .unwrap();
+    assert_eq!(first.len(), 1);
+    obs_store.insert_batch(&first).unwrap();
+
+    // Re-extracting identical content: subject normalizes to the same "posmask" key,
+    // check_duplicate hits -> dropped.
+    let second = extract_and_dedup(&[raw], &mock, &obs_store).await.unwrap();
+    assert!(
+        second.is_empty(),
+        "re-extraction of identical content should yield no new observations"
     );
 }
 
@@ -214,7 +250,9 @@ fn test_batch_insert_and_query() {
             object_text: Some(format!("value_{i}")),
             object_type: None,
             evidence_text: None,
-            confidence: 0.5,
+            extraction_confidence: 0.7,
+            memory_type_candidate: None,
+            observation_detail_json: None,
             evidence_alpha: 1.0,
             evidence_beta: 1.0,
             status: ObservationStatus::Candidate,
@@ -280,7 +318,9 @@ fn test_multiple_stores_share_connection() {
         object_text: Some("true".to_string()),
         object_type: None,
         evidence_text: None,
-        confidence: 0.5,
+        extraction_confidence: 0.7,
+        memory_type_candidate: None,
+        observation_detail_json: None,
         evidence_alpha: 1.0,
         evidence_beta: 1.0,
         status: ObservationStatus::Candidate,

@@ -3,11 +3,11 @@
     "cargo_check"
   ],
   "id": "p1a-memory-item-decision",
-  "is_archived": false,
+  "is_archived": true,
   "is_held": false,
-  "last_event_seq": 1,
+  "last_event_seq": 7,
   "objective": "MemoryItem 去留决策：保留并实现 pipeline stage 或从设计文档删除",
-  "phase": "planning",
+  "phase": "completed",
   "read_scope": [
     "crates/memory-runtime/src/migrations/001_initial.sql",
     "crates/memory-runtime/src/models/memory_item.rs",

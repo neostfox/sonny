@@ -49,7 +49,7 @@ Topic Segmentation          ❌ 未实现
 Observation Extraction      ✅ extract_observations()
 Memory Type Classification  ❌ 未实现
 Concept Candidate Building  ❌ 未实现
-Deduplication               ❌ check_duplicate() 存在但未调用
+Deduplication               ✅ extract_and_dedup() → check_duplicate()（p2b）+ canonical_key_light 归一
 Conflict Detection          ❌ 未实现
 Concept Promotion / Review  ❌ 未实现
 ```
@@ -82,20 +82,19 @@ Concept Promotion / Review  ❌ 未实现
 | 表达 A包含B、A不包含B、A依赖B 等 | predicate 字段自由文本 | ⚠️ | 无类型约束，LLM 自由发挥 |
 | 区分用户确认 vs 助手推测 | `ObservationSourceType` | ✅ | |
 | 表达排障路径、任务状态、被否定假设 | 三元组结构不支持 | ❌ | **D2**: 三元组太弱 |
-| memory_type_candidate | 不存在 | ❌ | 设计 §12.1 要求但模型缺失 |
+| memory_type_candidate | `observation.memory_type_candidate` | ✅ | p1d 落地 |
 | surprise_score | `observation.surprise_score` | ⚠️ | 字段存在，永远默认 0.5 |
+
+**决策 (2026-06-13, p1c，p1d 已落地代码)**: confidence 拆为 `extraction_confidence`（提取时由 source_type 固定，不可变）与 `fact_confidence`（Beta 后验）。recall 排序用 `effective_confidence = extraction_confidence × fact_confidence`。代码：`ObservationSourceType::extraction_confidence()`、`Observation::effective_confidence()`。
 
 ### §4.3 MemoryItem
 
 | 设计要求 | 代码位置 | 状态 |
 |---------|---------|------|
-| 9 种记忆类型 | `models/memory_item.rs` `MemoryType` | ✅ 模型存在 |
-| 作为长期可复用记忆单元 | 无代码读写 | ❌ **D3**: 死代码 |
-| SQL 表 | `migrations/001_initial.sql` | ✅ 表存在 |
-| Store trait | 不存在 | ❌ |
-| Pipeline stage | 不存在 | ❌ |
+| 9 种记忆类型 | `observation.rs` `MemoryType`（Observation 属性） | ✅ p1d 迁移 |
+| 独立 MemoryItem 实体 / Store / Pipeline stage | 已删除（`memory_item.rs` 删除，migration 003 DROP） | ✅ p1d |
 
-**决策待定**: MemoryItem 是概念生长的必要中转站（设计 §16），还是可以从 Observation 直接聚类成 ConceptCandidate？
+**决策 (2026-06-13, p1a，p1d 已落地代码)**: 删除 MemoryItem 独立实体与 pipeline 中转层。9 种 MemoryType 折叠为 Observation 属性（`memory_type_candidate` + `observation_detail_json`），概念生长直接基于 Observation 聚类。依据：P3-B 聚类引擎以 Observation 为输入（非 MemoryItem）；MemoryItem 为死代码（无 store/pipeline 调用）；增加中转层倍增去重/置信传播/drift 表面而无收益。
 
 ### §4.4 ConceptCandidate
 

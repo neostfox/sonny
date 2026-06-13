@@ -5,7 +5,7 @@ use std::sync::LazyLock;
 use rusqlite::{params, Connection};
 
 use crate::error::MemoryResult;
-use crate::models::observation::{Observation, ObservationSourceType};
+use crate::models::observation::{MemoryType, Observation, ObservationSourceType};
 use crate::models::status::ObservationStatus;
 
 use super::traits::ObservationStore;
@@ -22,11 +22,12 @@ impl SqliteObservationStore {
 
 const OBS_COLUMNS: &str = "\
     observation_id, workspace_id, memory_id, subject_text, subject_type, \
-    predicate, object_text, object_type, evidence_text, confidence, evidence_alpha, evidence_beta, \
-    status, surprise_score, source_type, consolidated, created_at";
+    predicate, object_text, object_type, evidence_text, extraction_confidence, evidence_alpha, evidence_beta, \
+    status, surprise_score, source_type, consolidated, created_at, \
+    memory_type_candidate, observation_detail_json";
 
 static OBS_INSERT: LazyLock<String> = LazyLock::new(|| {
-    format!("INSERT INTO observation ({OBS_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)")
+    format!("INSERT INTO observation ({OBS_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)")
 });
 static OBS_GET: LazyLock<String> =
     LazyLock::new(|| format!("SELECT {OBS_COLUMNS} FROM observation WHERE observation_id = ?1"));
@@ -54,7 +55,7 @@ impl ObservationStore for SqliteObservationStore {
                 &obs.object_text,
                 &obs.object_type,
                 &obs.evidence_text,
-                &obs.confidence,
+                &obs.extraction_confidence,
                 &obs.evidence_alpha,
                 &obs.evidence_beta,
                 &status,
@@ -62,6 +63,8 @@ impl ObservationStore for SqliteObservationStore {
                 &source,
                 &obs.consolidated,
                 &obs.created_at,
+                &obs.memory_type_candidate.as_ref().map(|t| t.as_str()),
+                &obs.observation_detail_json,
             ],
         )?;
         Ok(())
@@ -86,7 +89,7 @@ impl ObservationStore for SqliteObservationStore {
                         &obs.object_text,
                         &obs.object_type,
                         &obs.evidence_text,
-                        &obs.confidence,
+                        &obs.extraction_confidence,
                         &obs.evidence_alpha,
                         &obs.evidence_beta,
                         &status,
@@ -94,6 +97,8 @@ impl ObservationStore for SqliteObservationStore {
                         &source,
                         &obs.consolidated,
                         &obs.created_at,
+                        &obs.memory_type_candidate.as_ref().map(|t| t.as_str()),
+                        &obs.observation_detail_json,
                     ],
                 )?;
             }
@@ -139,10 +144,9 @@ impl ObservationStore for SqliteObservationStore {
 
     fn update_confidence(&self, observation_id: &str, alpha: f64, beta: f64) -> MemoryResult<()> {
         let conn = self.conn.lock();
-        let confidence = alpha / (alpha + beta);
         let changed = conn.execute(
-            "UPDATE observation SET evidence_alpha = ?1, evidence_beta = ?2, confidence = ?3 WHERE observation_id = ?4",
-            params![alpha, beta, confidence, observation_id],
+            "UPDATE observation SET evidence_alpha = ?1, evidence_beta = ?2 WHERE observation_id = ?3",
+            params![alpha, beta, observation_id],
         )?;
         if changed == 0 {
             return Err(crate::error::MemoryError::ObservationNotFound {
@@ -205,7 +209,7 @@ fn row_to_observation(row: &rusqlite::Row<'_>) -> rusqlite::Result<Observation> 
         object_text: row.get(6)?,
         object_type: row.get(7)?,
         evidence_text: row.get(8)?,
-        confidence: row.get(9)?,
+        extraction_confidence: row.get(9)?,
         evidence_alpha: row.get(10)?,
         evidence_beta: row.get(11)?,
         status: parse_observation_status(&row.get::<_, String>(12)?),
@@ -213,6 +217,10 @@ fn row_to_observation(row: &rusqlite::Row<'_>) -> rusqlite::Result<Observation> 
         source_type: parse_observation_source_type(&row.get::<_, String>(14)?),
         consolidated: row.get(15)?,
         created_at: row.get(16)?,
+        memory_type_candidate: row
+            .get::<_, Option<String>>(17)?
+            .and_then(|s| parse_memory_type(&s)),
+        observation_detail_json: row.get(18)?,
     })
 }
 
@@ -228,4 +236,14 @@ fn parse_observation_source_type(s: &str) -> ObservationSourceType {
         tracing::warn!("Unknown observation source type '{s}', defaulting to assistant_guess");
         ObservationSourceType::AssistantGuess
     })
+}
+
+fn parse_memory_type(s: &str) -> Option<MemoryType> {
+    match s.parse::<MemoryType>() {
+        Ok(t) => Some(t),
+        Err(()) => {
+            tracing::warn!("Unknown memory_type_candidate '{s}', defaulting to None");
+            None
+        }
+    }
 }

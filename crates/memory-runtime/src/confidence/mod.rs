@@ -26,36 +26,36 @@ pub enum EvidenceType {
 impl fmt::Display for EvidenceType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::UserConfirmation    => write!(f, "user_confirmation"),
-            Self::FileEvidence        => write!(f, "file_evidence"),
-            Self::RepeatedOccurrence  => write!(f, "repeated_occurrence"),
-            Self::CrossSession3Plus   => write!(f, "cross_session_3_plus"),
-            Self::CrossSession2       => write!(f, "cross_session_2"),
-            Self::HumanReviewConfirm  => write!(f, "human_review_confirm"),
-            Self::RecallNotCorrected  => write!(f, "recall_not_corrected"),
-            Self::UserNegation        => write!(f, "user_negation"),
+            Self::UserConfirmation => write!(f, "user_confirmation"),
+            Self::FileEvidence => write!(f, "file_evidence"),
+            Self::RepeatedOccurrence => write!(f, "repeated_occurrence"),
+            Self::CrossSession3Plus => write!(f, "cross_session_3_plus"),
+            Self::CrossSession2 => write!(f, "cross_session_2"),
+            Self::HumanReviewConfirm => write!(f, "human_review_confirm"),
+            Self::RecallNotCorrected => write!(f, "recall_not_corrected"),
+            Self::UserNegation => write!(f, "user_negation"),
             Self::ConflictingEvidence => write!(f, "conflicting_evidence"),
-            Self::RecallCorrected     => write!(f, "recall_corrected"),
-            Self::InternalConflict    => write!(f, "internal_conflict"),
-            Self::LongInactivity      => write!(f, "long_inactivity"),
+            Self::RecallCorrected => write!(f, "recall_corrected"),
+            Self::InternalConflict => write!(f, "internal_conflict"),
+            Self::LongInactivity => write!(f, "long_inactivity"),
             Self::AssistantSpeculation => write!(f, "assistant_speculation"),
         }
     }
 }
 
 const EVIDENCE_WEIGHTS: [(EvidenceType, f32, f32); 13] = [
-    (EvidenceType::UserConfirmation,    2.0, 0.0),
-    (EvidenceType::FileEvidence,        1.5, 0.0),
-    (EvidenceType::RepeatedOccurrence,  1.0, 0.0),
-    (EvidenceType::CrossSession3Plus,   2.0, 0.0),
-    (EvidenceType::CrossSession2,       1.0, 0.0),
-    (EvidenceType::HumanReviewConfirm,  2.0, 0.0),
-    (EvidenceType::RecallNotCorrected,  0.3, 0.0),
-    (EvidenceType::UserNegation,        0.0, 3.0),
+    (EvidenceType::UserConfirmation, 2.0, 0.0),
+    (EvidenceType::FileEvidence, 1.5, 0.0),
+    (EvidenceType::RepeatedOccurrence, 1.0, 0.0),
+    (EvidenceType::CrossSession3Plus, 2.0, 0.0),
+    (EvidenceType::CrossSession2, 1.0, 0.0),
+    (EvidenceType::HumanReviewConfirm, 2.0, 0.0),
+    (EvidenceType::RecallNotCorrected, 0.3, 0.0),
+    (EvidenceType::UserNegation, 0.0, 3.0),
     (EvidenceType::ConflictingEvidence, 0.0, 2.0),
-    (EvidenceType::RecallCorrected,     0.0, 1.5),
-    (EvidenceType::InternalConflict,    0.0, 1.0),
-    (EvidenceType::LongInactivity,      0.0, 0.5), // caller must scale by days/30
+    (EvidenceType::RecallCorrected, 0.0, 1.5),
+    (EvidenceType::InternalConflict, 0.0, 1.0),
+    (EvidenceType::LongInactivity, 0.0, 0.5), // caller must scale by days/30
     (EvidenceType::AssistantSpeculation, 0.0, 0.0),
 ];
 
@@ -69,7 +69,10 @@ fn get_weight(evidence_type: &EvidenceType) -> (f32, f32) {
 
 impl BetaConfidence {
     pub fn new() -> Self {
-        Self { alpha: 1.0, beta: 1.0 }
+        Self {
+            alpha: 1.0,
+            beta: 1.0,
+        }
     }
 
     pub fn with_values(alpha: f32, beta: f32) -> Self {
@@ -153,9 +156,9 @@ mod tests {
     #[test]
     fn mixed_evidence_sequence() {
         let mut bc = BetaConfidence::new();
-        bc.update(&EvidenceType::RepeatedOccurrence);  // alpha += 1.0
-        bc.update(&EvidenceType::CrossSession2);       // alpha += 1.0
-        bc.update(&EvidenceType::RecallNotCorrected);  // alpha += 0.3
+        bc.update(&EvidenceType::RepeatedOccurrence); // alpha += 1.0
+        bc.update(&EvidenceType::CrossSession2); // alpha += 1.0
+        bc.update(&EvidenceType::RecallNotCorrected); // alpha += 0.3
         assert_eq!(bc.alpha, 3.3); // 1.0 + 1.0 + 1.0 + 0.3
         assert_eq!(bc.beta, 1.0);
         let expected = 3.3 / 4.3;

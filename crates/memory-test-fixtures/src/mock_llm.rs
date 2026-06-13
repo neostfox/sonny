@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
-use memory_runtime::llm::traits::LlmProvider;
 use memory_runtime::error::MemoryResult;
+use memory_runtime::llm::traits::LlmProvider;
 
 pub struct MockLlmProvider {
     responses: HashMap<String, String>,
@@ -21,7 +21,8 @@ impl MockLlmProvider {
     }
 
     pub fn with_response(mut self, pattern: &str, response: &str) -> Self {
-        self.responses.insert(pattern.to_string(), response.to_string());
+        self.responses
+            .insert(pattern.to_string(), response.to_string());
         self
     }
 

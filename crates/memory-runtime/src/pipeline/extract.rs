@@ -105,15 +105,16 @@ pub async fn extract_observations(
     }
 
     let user_prompt = format_messages(raw_memories);
-    let response = llm.complete(&user_prompt, Some(EXTRACTION_SYSTEM_PROMPT)).await?;
+    let response = llm
+        .complete(&user_prompt, Some(EXTRACTION_SYSTEM_PROMPT))
+        .await?;
 
     let cleaned = repair_json(&response);
-    let parsed: ExtractionResult = serde_json::from_str(&cleaned).map_err(|e| {
-        MemoryError::LlmInvalidJson {
+    let parsed: ExtractionResult =
+        serde_json::from_str(&cleaned).map_err(|e| MemoryError::LlmInvalidJson {
             source: e,
             raw: response.clone(),
-        }
-    })?;
+        })?;
 
     let memory_id = &raw_memories[0].memory_id;
     let workspace_id = &raw_memories[0].workspace_id;
@@ -217,18 +218,16 @@ mod tests {
 
     #[test]
     fn format_messages_basic() {
-        let memories = vec![
-            RawMemory {
-                memory_id: "m1".into(),
-                workspace_id: "ws".into(),
-                session_id: "s1".into(),
-                role: "user".into(),
-                content: "Hello".into(),
-                source_type: crate::models::raw_memory::SourceType::SessionFile,
-                source_ref: "test.json".into(),
-                created_at: "2026-01-01".into(),
-            },
-        ];
+        let memories = vec![RawMemory {
+            memory_id: "m1".into(),
+            workspace_id: "ws".into(),
+            session_id: "s1".into(),
+            role: "user".into(),
+            content: "Hello".into(),
+            source_type: crate::models::raw_memory::SourceType::SessionFile,
+            source_ref: "test.json".into(),
+            created_at: "2026-01-01".into(),
+        }];
         let result = format_messages(&memories);
         assert!(result.contains("[user]: Hello"));
     }

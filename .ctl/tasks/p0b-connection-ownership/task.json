@@ -4,11 +4,11 @@
     "cargo_test"
   ],
   "id": "p0b-connection-ownership",
-  "is_archived": false,
+  "is_archived": true,
   "is_held": false,
-  "last_event_seq": 1,
+  "last_event_seq": 11,
   "objective": "连接所有权模型重构：Database 持有 Arc Mutex Connection 实现 store 共享",
-  "phase": "planning",
+  "phase": "completed",
   "read_scope": [
     "crates/memory-runtime/src/store",
     "crates/memory-runtime/tests",

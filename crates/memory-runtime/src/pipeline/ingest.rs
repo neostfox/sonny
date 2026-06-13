@@ -4,14 +4,24 @@ use crate::error::{MemoryError, MemoryResult};
 use crate::models::raw_memory::{RawMemory, SourceType};
 
 pub trait SessionParser: Send + Sync {
-    fn parse(&self, content: &str, workspace_id: &str, source_ref: &str) -> MemoryResult<Vec<RawMemory>>;
+    fn parse(
+        &self,
+        content: &str,
+        workspace_id: &str,
+        source_ref: &str,
+    ) -> MemoryResult<Vec<RawMemory>>;
     fn can_parse(&self, content: &str, filename: &str) -> bool;
 }
 
 pub struct TrellisJournalParser;
 
 impl SessionParser for TrellisJournalParser {
-    fn parse(&self, content: &str, workspace_id: &str, source_ref: &str) -> MemoryResult<Vec<RawMemory>> {
+    fn parse(
+        &self,
+        content: &str,
+        workspace_id: &str,
+        source_ref: &str,
+    ) -> MemoryResult<Vec<RawMemory>> {
         let mut memories = Vec::new();
         let mut current_session_id = String::new();
         let mut current_date = String::new();
@@ -38,7 +48,8 @@ impl SessionParser for TrellisJournalParser {
 
                 // Extract session info
                 let header = trimmed.trim_start_matches('#').trim();
-                current_session_id = extract_session_id(header).unwrap_or_else(|| header.to_string());
+                current_session_id =
+                    extract_session_id(header).unwrap_or_else(|| header.to_string());
                 current_date.clear();
                 current_section = "header".to_string();
                 content_buffer = format!("{}\n", header);
@@ -117,10 +128,16 @@ impl SessionParser for TrellisJournalParser {
 pub struct JsonSessionParser;
 
 impl SessionParser for JsonSessionParser {
-    fn parse(&self, content: &str, workspace_id: &str, source_ref: &str) -> MemoryResult<Vec<RawMemory>> {
-        let session: JsonSession = serde_json::from_str(content).map_err(|e| MemoryError::SessionParse {
-            details: format!("Invalid JSON session: {e}"),
-        })?;
+    fn parse(
+        &self,
+        content: &str,
+        workspace_id: &str,
+        source_ref: &str,
+    ) -> MemoryResult<Vec<RawMemory>> {
+        let session: JsonSession =
+            serde_json::from_str(content).map_err(|e| MemoryError::SessionParse {
+                details: format!("Invalid JSON session: {e}"),
+            })?;
 
         let mut memories = Vec::new();
         for msg in &session.messages {
@@ -132,7 +149,10 @@ impl SessionParser for JsonSessionParser {
                 content: msg.content.clone(),
                 source_type: SourceType::SessionFile,
                 source_ref: source_ref.to_string(),
-                created_at: session.date.clone().unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
+                created_at: session
+                    .date
+                    .clone()
+                    .unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
             });
         }
         Ok(memories)
@@ -143,11 +163,14 @@ impl SessionParser for JsonSessionParser {
     }
 }
 
-pub fn detect_and_parse(content: &str, filename: &str, workspace_id: &str, source_ref: &str) -> MemoryResult<Vec<RawMemory>> {
-    let parsers: Vec<Box<dyn SessionParser>> = vec![
-        Box::new(TrellisJournalParser),
-        Box::new(JsonSessionParser),
-    ];
+pub fn detect_and_parse(
+    content: &str,
+    filename: &str,
+    workspace_id: &str,
+    source_ref: &str,
+) -> MemoryResult<Vec<RawMemory>> {
+    let parsers: Vec<Box<dyn SessionParser>> =
+        vec![Box::new(TrellisJournalParser), Box::new(JsonSessionParser)];
 
     for parser in &parsers {
         if parser.can_parse(content, filename) {
@@ -205,9 +228,8 @@ struct JsonMessage {
 
 use std::sync::LazyLock;
 
-static KEY_VALUE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^\*\*(\w+)\*\*:\s*(.+)$").unwrap()
-});
+static KEY_VALUE_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\*\*(\w+)\*\*:\s*(.+)$").unwrap());
 
 #[cfg(test)]
 mod tests {
@@ -264,8 +286,13 @@ This is a test summary.
 
 Another summary.
 "#;
-        let result = TrellisJournalParser.parse(journal, "ws1", "journal.md").unwrap();
-        assert!(result.len() >= 2, "Should have at least 2 sections from session 1");
+        let result = TrellisJournalParser
+            .parse(journal, "ws1", "journal.md")
+            .unwrap();
+        assert!(
+            result.len() >= 2,
+            "Should have at least 2 sections from session 1"
+        );
         assert!(result.iter().any(|m| m.content.contains("Test Session")));
         assert!(result.iter().any(|m| m.content.contains("test summary")));
     }

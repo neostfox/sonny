@@ -3,20 +3,17 @@ use rusqlite::Connection;
 use crate::error::MemoryResult;
 
 const STRIPPABLE_SUFFIXES: &[&str] = &[
-    "_table", "_tbl", "_entity", "_model", "_class",
-    "_type", "_info", "_data", "_config", "_obj",
+    "_table", "_tbl", "_entity", "_model", "_class", "_type", "_info", "_data", "_config", "_obj",
     "_mgr", "_manager", "_service", "_handler",
 ];
 
 const BARE_SUFFIXES: &[&str] = &[
-    "service", "handler", "manager", "config",
-    "entity", "model", "class", "table", "type",
-    "info", "data", "object", "impl",
+    "service", "handler", "manager", "config", "entity", "model", "class", "table", "type", "info",
+    "data", "object", "impl",
 ];
 
 const PASCAL_SUFFIXES: &[&str] = &[
-    "Impl", "Class", "Type", "Model", "Table",
-    "Entity", "Info", "Data", "Object", "Service",
+    "Impl", "Class", "Type", "Model", "Table", "Entity", "Info", "Data", "Object", "Service",
     "Manager", "Handler", "Config",
 ];
 
@@ -37,7 +34,10 @@ pub fn canonical_key(raw: &str) -> String {
     let s = s.to_lowercase();
 
     // Normalize separators: spaces and hyphens -> underscores
-    let s: String = s.chars().map(|c| if c == ' ' || c == '-' { '_' } else { c }).collect();
+    let s: String = s
+        .chars()
+        .map(|c| if c == ' ' || c == '-' { '_' } else { c })
+        .collect();
 
     // Collapse repeated underscores
     let mut result = String::with_capacity(s.len());

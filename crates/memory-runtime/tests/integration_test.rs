@@ -3,15 +3,19 @@ use memory_runtime::entity::canonical_key;
 use memory_runtime::models::observation::{Observation, ObservationSourceType};
 use memory_runtime::models::raw_memory::{RawMemory, SourceType};
 use memory_runtime::models::status::ObservationStatus;
-use memory_runtime::pipeline::ingest::{detect_and_parse, SessionParser, TrellisJournalParser};
 use memory_runtime::pipeline::extract::extract_observations;
+use memory_runtime::pipeline::ingest::{detect_and_parse, SessionParser, TrellisJournalParser};
 use memory_runtime::store::connection::Database;
-use memory_runtime::store::migration::run_migrations;
 use memory_runtime::store::observation_store::SqliteObservationStore;
 use memory_runtime::store::raw_memory_store::SqliteRawMemoryStore;
 use memory_runtime::store::traits::{ObservationStore, RawMemoryStore};
 
-fn make_test_raw_memory(workspace_id: &str, session_id: &str, role: &str, content: &str) -> RawMemory {
+fn make_test_raw_memory(
+    workspace_id: &str,
+    session_id: &str,
+    role: &str,
+    content: &str,
+) -> RawMemory {
     RawMemory {
         memory_id: uuid::Uuid::new_v4().to_string(),
         workspace_id: workspace_id.to_string(),
@@ -24,7 +28,7 @@ fn make_test_raw_memory(workspace_id: &str, session_id: &str, role: &str, conten
     }
 }
 
-/// Helper: insert raw_memory rows directly via SQL so we can use a single connection for observation tests.
+/// Seed raw_memory rows directly via SQL through a shared connection.
 fn seed_raw_memories(conn: &rusqlite::Connection, memories: &[RawMemory]) {
     for m in memories {
         conn.execute(
@@ -38,16 +42,9 @@ fn seed_raw_memories(conn: &rusqlite::Connection, memories: &[RawMemory]) {
     }
 }
 
-fn open_test_conn() -> rusqlite::Connection {
-    let conn = rusqlite::Connection::open_in_memory().unwrap();
-    conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
-    run_migrations(&conn).unwrap();
-    conn
-}
-
 #[test]
 fn test_full_pipeline_json_ingest_to_store() {
-    let mut conn = open_test_conn();
+    let db = Database::open_in_memory().unwrap();
 
     // Step 1: Ingest JSON session
     let json = r#"{
@@ -62,13 +59,14 @@ fn test_full_pipeline_json_ingest_to_store() {
     let memories = detect_and_parse(json, "test.json", "test_ws", "test.json").unwrap();
     assert_eq!(memories.len(), 2);
 
-    // Step 2: Seed raw memories
-    seed_raw_memories(&conn, &memories);
+    // Step 2: Seed raw memories through the shared connection
+    {
+        let conn = db.conn.lock();
+        seed_raw_memories(&conn, &memories);
+    }
 
-    // Step 3: Move connection to observation store
-    let new_conn = rusqlite::Connection::open_in_memory().unwrap();
-    let old_conn = std::mem::replace(&mut conn, new_conn);
-    let obs_store = SqliteObservationStore::new(old_conn);
+    // Step 3: Observation store shares the same connection (P0-B fix)
+    let obs_store = SqliteObservationStore::new(db.conn.clone());
     let obs = Observation {
         observation_id: uuid::Uuid::new_v4().to_string(),
         workspace_id: "test_ws".to_string(),
@@ -101,9 +99,13 @@ fn test_full_pipeline_json_ingest_to_store() {
     let by_entity = obs_store.find_by_entity("POSMASK", "test_ws").unwrap();
     assert_eq!(by_entity.len(), 1);
 
-    let is_dup = obs_store.check_duplicate("POSMASK", "not_has_field", Some("机器字段"), "test_ws").unwrap();
+    let is_dup = obs_store
+        .check_duplicate("POSMASK", "not_has_field", Some("机器字段"), "test_ws")
+        .unwrap();
     assert!(is_dup);
-    let not_dup = obs_store.check_duplicate("OTHER", "not_has_field", Some("机器字段"), "test_ws").unwrap();
+    let not_dup = obs_store
+        .check_duplicate("OTHER", "not_has_field", Some("机器字段"), "test_ws")
+        .unwrap();
     assert!(!not_dup);
 }
 
@@ -146,10 +148,14 @@ This is a test summary with some technical details.
 - Fixed auth handler bug
 "#;
 
-    let memories = TrellisJournalParser.parse(journal, "ws1", "journal.md").unwrap();
+    let memories = TrellisJournalParser
+        .parse(journal, "ws1", "journal.md")
+        .unwrap();
     assert!(!memories.is_empty());
     assert!(memories.iter().all(|m| m.workspace_id == "ws1"));
-    assert!(memories.iter().all(|m| m.source_type == SourceType::TrellisJournal));
+    assert!(memories
+        .iter()
+        .all(|m| m.source_type == SourceType::TrellisJournal));
 }
 
 #[tokio::test]
@@ -167,16 +173,19 @@ async fn test_extract_with_mock_llm() {
     assert_eq!(observations.len(), 1);
     assert_eq!(observations[0].subject_text, "POSMASK");
     assert_eq!(observations[0].predicate, "not_has_field");
-    assert_eq!(observations[0].source_type, ObservationSourceType::UserMessage);
+    assert_eq!(
+        observations[0].source_type,
+        ObservationSourceType::UserMessage
+    );
 }
 
 #[test]
 fn test_batch_insert_and_query() {
-    let mut conn = open_test_conn();
+    let db = Database::open_in_memory().unwrap();
 
     // Seed raw memories first (FK constraint)
-    let raw_memories: Vec<RawMemory> = (0..5).map(|i| {
-        RawMemory {
+    let raw_memories: Vec<RawMemory> = (0..5)
+        .map(|i| RawMemory {
             memory_id: format!("mem_{i}"),
             workspace_id: "ws".to_string(),
             session_id: "test".to_string(),
@@ -185,14 +194,17 @@ fn test_batch_insert_and_query() {
             source_type: SourceType::SessionFile,
             source_ref: "test".to_string(),
             created_at: chrono::Utc::now().to_rfc3339(),
-        }
-    }).collect();
-    seed_raw_memories(&conn, &raw_memories);
+        })
+        .collect();
+    {
+        let conn = db.conn.lock();
+        seed_raw_memories(&conn, &raw_memories);
+    }
 
-    let old_conn = std::mem::replace(&mut conn, rusqlite::Connection::open_in_memory().unwrap());
-    let obs_store = SqliteObservationStore::new(old_conn);
-    let observations: Vec<Observation> = (0..5).map(|i| {
-        Observation {
+    // Observation store shares the same connection (P0-B fix)
+    let obs_store = SqliteObservationStore::new(db.conn.clone());
+    let observations: Vec<Observation> = (0..5)
+        .map(|i| Observation {
             observation_id: uuid::Uuid::new_v4().to_string(),
             workspace_id: "ws".to_string(),
             memory_id: format!("mem_{i}"),
@@ -210,8 +222,8 @@ fn test_batch_insert_and_query() {
             source_type: ObservationSourceType::UserMessage,
             consolidated: false,
             created_at: chrono::Utc::now().to_rfc3339(),
-        }
-    }).collect();
+        })
+        .collect();
 
     obs_store.insert_batch(&observations).unwrap();
 
@@ -225,7 +237,7 @@ fn test_batch_insert_and_query() {
 #[test]
 fn test_raw_memory_store_crud() {
     let db = Database::open_in_memory().unwrap();
-    let store = SqliteRawMemoryStore::new(db.conn);
+    let store = SqliteRawMemoryStore::new(db.conn.clone());
 
     let raw = make_test_raw_memory("ws1", "session_abc", "user", "test content");
     store.insert(&raw).unwrap();
@@ -240,4 +252,46 @@ fn test_raw_memory_store_crud() {
     // Different workspace returns empty
     let empty = store.list_by_workspace("ws2", 10).unwrap();
     assert!(empty.is_empty());
+}
+
+/// P0-B regression: a single Database must back both RawMemoryStore and
+/// ObservationStore simultaneously. Before the Arc<Mutex> refactor, constructing
+/// the second store moved the Connection out of the first.
+#[test]
+fn test_multiple_stores_share_connection() {
+    let db = Database::open_in_memory().unwrap();
+
+    let raw_store = SqliteRawMemoryStore::new(db.conn.clone());
+    let obs_store = SqliteObservationStore::new(db.conn.clone());
+
+    // Insert a raw memory through the raw store
+    let raw = make_test_raw_memory("ws1", "shared_session", "user", "shared connection works");
+    raw_store.insert(&raw).unwrap();
+
+    // Insert an observation referencing that raw memory through the obs store.
+    // The FK constraint is satisfied only because both stores see the same DB.
+    let obs = Observation {
+        observation_id: uuid::Uuid::new_v4().to_string(),
+        workspace_id: "ws1".to_string(),
+        memory_id: raw.memory_id.clone(),
+        subject_text: "connection".to_string(),
+        subject_type: None,
+        predicate: "is_shared".to_string(),
+        object_text: Some("true".to_string()),
+        object_type: None,
+        evidence_text: None,
+        confidence: 0.5,
+        evidence_alpha: 1.0,
+        evidence_beta: 1.0,
+        status: ObservationStatus::Candidate,
+        surprise_score: 0.0,
+        source_type: ObservationSourceType::UserMessage,
+        consolidated: false,
+        created_at: chrono::Utc::now().to_rfc3339(),
+    };
+    obs_store.insert(&obs).unwrap();
+
+    // Both stores read the shared state
+    assert_eq!(raw_store.get_by_session("shared_session").unwrap().len(), 1);
+    assert_eq!(obs_store.list_by_workspace("ws1", None).unwrap().len(), 1);
 }

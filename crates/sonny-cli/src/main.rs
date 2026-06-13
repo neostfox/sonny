@@ -1,11 +1,11 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
+use memory_runtime::pipeline::ingest::detect_and_parse;
 use memory_runtime::store::connection::Database;
-use memory_runtime::store::traits::{ObservationStore, RawMemoryStore};
 use memory_runtime::store::observation_store::SqliteObservationStore;
 use memory_runtime::store::raw_memory_store::SqliteRawMemoryStore;
-use memory_runtime::pipeline::ingest::detect_and_parse;
+use memory_runtime::store::traits::{ObservationStore, RawMemoryStore};
 
 #[derive(Parser)]
 #[command(name = "sonny", about = "Memory Runtime for Coding Agents")]
@@ -55,8 +55,7 @@ fn main() {
             drop(db);
         }
         Commands::IngestSession { path, workspace } => {
-            let content = std::fs::read_to_string(&path)
-                .expect("Failed to read session file");
+            let content = std::fs::read_to_string(&path).expect("Failed to read session file");
             let filename = path.file_name().unwrap().to_string_lossy().to_string();
             let source_ref = path.to_string_lossy().to_string();
 
@@ -64,7 +63,7 @@ fn main() {
                 .expect("Failed to parse session");
 
             let db = Database::open(&cli.db).expect("Failed to open database");
-            let store = SqliteRawMemoryStore::new(db.conn);
+            let store = SqliteRawMemoryStore::new(db.conn.clone());
 
             let count = memories.len();
             for m in &memories {
@@ -74,9 +73,10 @@ fn main() {
         }
         Commands::ListObservations { status, workspace } => {
             let db = Database::open(&cli.db).expect("Failed to open database");
-            let store = SqliteObservationStore::new(db.conn);
+            let store = SqliteObservationStore::new(db.conn.clone());
 
-            let observations = store.list_by_workspace(&workspace, status.as_deref())
+            let observations = store
+                .list_by_workspace(&workspace, status.as_deref())
                 .expect("Failed to list observations");
 
             if observations.is_empty() {

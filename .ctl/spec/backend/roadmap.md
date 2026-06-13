@@ -59,11 +59,11 @@ gantt
 | 项 | 值 |
 |---|---|
 | 问题 | C1: 每个 store move Connection，多 store 无法共享 |
-| 修复 | `Database` 持有 `Arc<Mutex<Connection>>`，store clone Arc |
+| 修复 | `Database` 持有 `Arc<parking_lot::Mutex<Connection>>`，store clone Arc；`parking_lot::lock()` 免 unwrap |
 | 文件 | `connection.rs`, 所有 store impl, `sonny-cli/main.rs`, `integration_test.rs` |
 | 验收 | 单个 `Database` 可以创建多个 store，集成测试不再用 `mem::replace` |
 | 依赖 | 无 |
-| 风险 | 所有 store 接口签名不变，只改内部所有权。`Arc<Mutex<>>` 不改变 lock 粒度 |
+| 状态 | ✅ 已完成 (`p0b-connection-ownership`) — 35 tests pass，新增 `test_multiple_stores_share_connection`，2 gates PASS |
 
 ### P0-C: `find_by_entities` LIKE 搜索替换
 

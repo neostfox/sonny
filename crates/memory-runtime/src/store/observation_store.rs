@@ -1,6 +1,7 @@
-use std::sync::Mutex;
+use parking_lot::Mutex;
+use std::sync::Arc;
 
-use rusqlite::{Connection, params, params_from_iter};
+use rusqlite::{params, params_from_iter, Connection};
 
 use crate::error::MemoryResult;
 use crate::models::observation::{Observation, ObservationSourceType};
@@ -9,12 +10,12 @@ use crate::models::status::ObservationStatus;
 use super::traits::ObservationStore;
 
 pub struct SqliteObservationStore {
-    conn: Mutex<Connection>,
+    conn: Arc<Mutex<Connection>>,
 }
 
 impl SqliteObservationStore {
-    pub fn new(conn: Connection) -> Self {
-        Self { conn: Mutex::new(conn) }
+    pub fn new(conn: Arc<Mutex<Connection>>) -> Self {
+        Self { conn }
     }
 }
 
@@ -47,7 +48,7 @@ fn obs_params(obs: &Observation) -> Vec<Box<dyn rusqlite::ToSql>> {
 
 impl ObservationStore for SqliteObservationStore {
     fn insert(&self, obs: &Observation) -> MemoryResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             &format!("INSERT INTO observation ({OBS_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)"),
             params_from_iter(obs_params(obs)),
@@ -56,7 +57,7 @@ impl ObservationStore for SqliteObservationStore {
     }
 
     fn insert_batch(&self, observations: &[Observation]) -> MemoryResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let tx = conn.unchecked_transaction()?;
         {
             let sql = format!("INSERT INTO observation ({OBS_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)");
@@ -69,7 +70,7 @@ impl ObservationStore for SqliteObservationStore {
     }
 
     fn get(&self, observation_id: &str) -> MemoryResult<Option<Observation>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let result = conn.query_row(
             &format!("SELECT {OBS_COLUMNS} FROM observation WHERE observation_id = ?1"),
             [observation_id],
@@ -82,8 +83,12 @@ impl ObservationStore for SqliteObservationStore {
         }
     }
 
-    fn list_by_workspace(&self, workspace_id: &str, status: Option<&str>) -> MemoryResult<Vec<Observation>> {
-        let conn = self.conn.lock().unwrap();
+    fn list_by_workspace(
+        &self,
+        workspace_id: &str,
+        status: Option<&str>,
+    ) -> MemoryResult<Vec<Observation>> {
+        let conn = self.conn.lock();
         let result = if let Some(status) = status {
             let sql = format!("SELECT {OBS_COLUMNS} FROM observation WHERE workspace_id = ?1 AND status = ?2 ORDER BY created_at DESC");
             collect_rows(&conn, &sql, params![workspace_id, status])?
@@ -95,7 +100,7 @@ impl ObservationStore for SqliteObservationStore {
     }
 
     fn update_status(&self, observation_id: &str, status: &str) -> MemoryResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let changed = conn.execute(
             "UPDATE observation SET status = ?1 WHERE observation_id = ?2",
             params![status, observation_id],
@@ -109,7 +114,7 @@ impl ObservationStore for SqliteObservationStore {
     }
 
     fn update_confidence(&self, observation_id: &str, alpha: f64, beta: f64) -> MemoryResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let confidence = alpha / (alpha + beta);
         let changed = conn.execute(
             "UPDATE observation SET evidence_alpha = ?1, evidence_beta = ?2, confidence = ?3 WHERE observation_id = ?4",
@@ -124,15 +129,21 @@ impl ObservationStore for SqliteObservationStore {
     }
 
     fn find_by_entity(&self, entity: &str, workspace_id: &str) -> MemoryResult<Vec<Observation>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let sql = format!(
             "SELECT {OBS_COLUMNS} FROM observation WHERE workspace_id = ?1 AND (subject_text = ?2 OR object_text = ?2) ORDER BY created_at DESC"
         );
         Ok(collect_rows(&conn, &sql, params![workspace_id, entity])?)
     }
 
-    fn check_duplicate(&self, subject: &str, predicate: &str, object: Option<&str>, workspace_id: &str) -> MemoryResult<bool> {
-        let conn = self.conn.lock().unwrap();
+    fn check_duplicate(
+        &self,
+        subject: &str,
+        predicate: &str,
+        object: Option<&str>,
+        workspace_id: &str,
+    ) -> MemoryResult<bool> {
+        let conn = self.conn.lock();
         let count: i64 = if let Some(object) = object {
             conn.query_row(
                 "SELECT COUNT(*) FROM observation WHERE workspace_id = ?1 AND subject_text = ?2 AND predicate = ?3 AND object_text = ?4",
@@ -150,9 +161,14 @@ impl ObservationStore for SqliteObservationStore {
     }
 }
 
-fn collect_rows(conn: &Connection, sql: &str, p: &[&dyn rusqlite::ToSql]) -> MemoryResult<Vec<Observation>> {
+fn collect_rows(
+    conn: &Connection,
+    sql: &str,
+    p: &[&dyn rusqlite::ToSql],
+) -> MemoryResult<Vec<Observation>> {
     let mut stmt = conn.prepare(sql)?;
-    let rows: Vec<Observation> = stmt.query_map(p, row_to_observation)?
+    let rows: Vec<Observation> = stmt
+        .query_map(p, row_to_observation)?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
 }

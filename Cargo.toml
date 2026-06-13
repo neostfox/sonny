@@ -22,3 +22,4 @@ pulldown-cmark = "0.13"
 regex = "1"
 clap = { version = "4", features = ["derive"] }
 dirs = "6"
+parking_lot = "0.12"

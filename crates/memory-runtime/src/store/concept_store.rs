@@ -1,6 +1,7 @@
-use std::sync::Mutex;
+use parking_lot::Mutex;
+use std::sync::Arc;
 
-use rusqlite::{Connection, params, params_from_iter};
+use rusqlite::{params, params_from_iter, Connection};
 
 use crate::error::MemoryResult;
 use crate::models::concept::{Concept, ConceptCandidate, ConceptType};
@@ -9,12 +10,12 @@ use crate::models::status::{ConceptStatus, ObservationStatus};
 use super::traits::ConceptStore;
 
 pub struct SqliteConceptStore {
-    conn: Mutex<Connection>,
+    conn: Arc<Mutex<Connection>>,
 }
 
 impl SqliteConceptStore {
-    pub fn new(conn: Connection) -> Self {
-        Self { conn: Mutex::new(conn) }
+    pub fn new(conn: Arc<Mutex<Connection>>) -> Self {
+        Self { conn }
     }
 }
 
@@ -88,18 +89,26 @@ fn concept_params(c: &Concept) -> Vec<Box<dyn rusqlite::ToSql>> {
 
 impl ConceptStore for SqliteConceptStore {
     fn insert_candidate(&self, candidate: &ConceptCandidate) -> MemoryResult<()> {
-        let conn = self.conn.lock().unwrap();
-        let placeholders: Vec<&str> = (1..=22).map(|i| {
-            static VALS: [&str; 22] = ["?1","?2","?3","?4","?5","?6","?7","?8","?9","?10","?11","?12","?13","?14","?15","?16","?17","?18","?19","?20","?21","?22"];
-            VALS[i - 1]
-        }).collect();
-        let sql = format!("INSERT INTO concept_candidate ({CANDIDATE_COLUMNS}) VALUES ({})", placeholders.join(", "));
+        let conn = self.conn.lock();
+        let placeholders: Vec<&str> = (1..=22)
+            .map(|i| {
+                static VALS: [&str; 22] = [
+                    "?1", "?2", "?3", "?4", "?5", "?6", "?7", "?8", "?9", "?10", "?11", "?12",
+                    "?13", "?14", "?15", "?16", "?17", "?18", "?19", "?20", "?21", "?22",
+                ];
+                VALS[i - 1]
+            })
+            .collect();
+        let sql = format!(
+            "INSERT INTO concept_candidate ({CANDIDATE_COLUMNS}) VALUES ({})",
+            placeholders.join(", ")
+        );
         conn.execute(&sql, params_from_iter(candidate_params(candidate)))?;
         Ok(())
     }
 
     fn get_candidate(&self, candidate_id: &str) -> MemoryResult<Option<ConceptCandidate>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let result = conn.query_row(
             &format!("SELECT {CANDIDATE_COLUMNS} FROM concept_candidate WHERE candidate_id = ?1"),
             params![candidate_id],
@@ -112,8 +121,12 @@ impl ConceptStore for SqliteConceptStore {
         }
     }
 
-    fn list_candidates(&self, workspace_id: &str, status: Option<&str>) -> MemoryResult<Vec<ConceptCandidate>> {
-        let conn = self.conn.lock().unwrap();
+    fn list_candidates(
+        &self,
+        workspace_id: &str,
+        status: Option<&str>,
+    ) -> MemoryResult<Vec<ConceptCandidate>> {
+        let conn = self.conn.lock();
         let result = if let Some(status) = status {
             let sql = format!("SELECT {CANDIDATE_COLUMNS} FROM concept_candidate WHERE workspace_id = ?1 AND status = ?2 ORDER BY created_at DESC");
             collect_candidates(&conn, &sql, params![workspace_id, status])?
@@ -125,15 +138,18 @@ impl ConceptStore for SqliteConceptStore {
     }
 
     fn insert_concept(&self, concept: &Concept) -> MemoryResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let placeholders: Vec<String> = (1..=23).map(|i| format!("?{i}")).collect();
-        let sql = format!("INSERT INTO concept ({CONCEPT_COLUMNS}) VALUES ({})", placeholders.join(", "));
+        let sql = format!(
+            "INSERT INTO concept ({CONCEPT_COLUMNS}) VALUES ({})",
+            placeholders.join(", ")
+        );
         conn.execute(&sql, params_from_iter(concept_params(concept)))?;
         Ok(())
     }
 
     fn get_concept(&self, concept_id: &str) -> MemoryResult<Option<Concept>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let result = conn.query_row(
             &format!("SELECT {CONCEPT_COLUMNS} FROM concept WHERE concept_id = ?1"),
             params![concept_id],
@@ -146,8 +162,12 @@ impl ConceptStore for SqliteConceptStore {
         }
     }
 
-    fn list_concepts(&self, workspace_id: &str, status: Option<&str>) -> MemoryResult<Vec<Concept>> {
-        let conn = self.conn.lock().unwrap();
+    fn list_concepts(
+        &self,
+        workspace_id: &str,
+        status: Option<&str>,
+    ) -> MemoryResult<Vec<Concept>> {
+        let conn = self.conn.lock();
         let result = if let Some(status) = status {
             let sql = format!("SELECT {CONCEPT_COLUMNS} FROM concept WHERE workspace_id = ?1 AND status = ?2 ORDER BY created_at DESC");
             collect_concepts(&conn, &sql, params![workspace_id, status])?
@@ -159,7 +179,7 @@ impl ConceptStore for SqliteConceptStore {
     }
 
     fn update_concept(&self, concept: &Concept) -> MemoryResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let changed = conn.execute(
             "UPDATE concept SET name = ?1, concept_type = ?2, definition = ?3, related_entities_json = ?4,
              known_facts_json = ?5, rejected_hypotheses_json = ?6, open_questions_json = ?7, evidence_json = ?8,
@@ -182,14 +202,20 @@ impl ConceptStore for SqliteConceptStore {
         Ok(())
     }
 
-    fn find_by_entities(&self, entities: &[String], workspace_id: &str) -> MemoryResult<Vec<Concept>> {
-        let conn = self.conn.lock().unwrap();
+    fn find_by_entities(
+        &self,
+        entities: &[String],
+        workspace_id: &str,
+    ) -> MemoryResult<Vec<Concept>> {
+        let conn = self.conn.lock();
         if entities.is_empty() {
             return Ok(vec![]);
         }
-        let conditions: Vec<String> = entities.iter().enumerate().map(|(i, _)| {
-            format!("related_entities_json LIKE '%' || ?{} || '%'", i + 3)
-        }).collect();
+        let conditions: Vec<String> = entities
+            .iter()
+            .enumerate()
+            .map(|(i, _)| format!("related_entities_json LIKE '%' || ?{} || '%'", i + 3))
+            .collect();
         let sql = format!(
             "SELECT {CONCEPT_COLUMNS} FROM concept WHERE workspace_id = ?1 AND status = ?2 AND related_entities_json IS NOT NULL AND ({}) ORDER BY confidence DESC",
             conditions.join(" OR ")
@@ -207,7 +233,7 @@ impl ConceptStore for SqliteConceptStore {
     }
 
     fn update_recall_stats(&self, concept_id: &str, success: bool) -> MemoryResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let now = chrono::Utc::now().to_rfc3339();
         if success {
             conn.execute(
@@ -224,16 +250,26 @@ impl ConceptStore for SqliteConceptStore {
     }
 }
 
-fn collect_candidates(conn: &Connection, sql: &str, p: &[&dyn rusqlite::ToSql]) -> MemoryResult<Vec<ConceptCandidate>> {
+fn collect_candidates(
+    conn: &Connection,
+    sql: &str,
+    p: &[&dyn rusqlite::ToSql],
+) -> MemoryResult<Vec<ConceptCandidate>> {
     let mut stmt = conn.prepare(sql)?;
-    let rows: Vec<ConceptCandidate> = stmt.query_map(p, row_to_candidate)?
+    let rows: Vec<ConceptCandidate> = stmt
+        .query_map(p, row_to_candidate)?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
 }
 
-fn collect_concepts(conn: &Connection, sql: &str, p: &[&dyn rusqlite::ToSql]) -> MemoryResult<Vec<Concept>> {
+fn collect_concepts(
+    conn: &Connection,
+    sql: &str,
+    p: &[&dyn rusqlite::ToSql],
+) -> MemoryResult<Vec<Concept>> {
     let mut stmt = conn.prepare(sql)?;
-    let rows: Vec<Concept> = stmt.query_map(p, row_to_concept)?
+    let rows: Vec<Concept> = stmt
+        .query_map(p, row_to_concept)?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
 }
@@ -270,7 +306,9 @@ fn row_to_concept(row: &rusqlite::Row<'_>) -> rusqlite::Result<Concept> {
         concept_id: row.get(0)?,
         workspace_id: row.get(1)?,
         name: row.get(2)?,
-        concept_type: row.get::<_, Option<String>>(3)?.map(|s| parse_concept_type(&s)),
+        concept_type: row
+            .get::<_, Option<String>>(3)?
+            .map(|s| parse_concept_type(&s)),
         definition: row.get(4)?,
         related_entities_json: row.get(5)?,
         known_facts_json: row.get(6)?,

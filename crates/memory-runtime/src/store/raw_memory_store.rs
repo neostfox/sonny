@@ -1,4 +1,5 @@
-use std::sync::Mutex;
+use parking_lot::Mutex;
+use std::sync::Arc;
 
 use rusqlite::Connection;
 
@@ -8,18 +9,18 @@ use crate::models::raw_memory::{RawMemory, SourceType};
 use super::traits::RawMemoryStore;
 
 pub struct SqliteRawMemoryStore {
-    conn: Mutex<Connection>,
+    conn: Arc<Mutex<Connection>>,
 }
 
 impl SqliteRawMemoryStore {
-    pub fn new(conn: Connection) -> Self {
-        Self { conn: Mutex::new(conn) }
+    pub fn new(conn: Arc<Mutex<Connection>>) -> Self {
+        Self { conn }
     }
 }
 
 impl RawMemoryStore for SqliteRawMemoryStore {
     fn insert(&self, raw: &RawMemory) -> MemoryResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "INSERT OR IGNORE INTO raw_memory (memory_id, workspace_id, session_id, role, content, source_type, source_ref, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
@@ -38,7 +39,7 @@ impl RawMemoryStore for SqliteRawMemoryStore {
     }
 
     fn get_by_session(&self, session_id: &str) -> MemoryResult<Vec<RawMemory>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT memory_id, workspace_id, session_id, role, content, source_type, source_ref, created_at
              FROM raw_memory WHERE session_id = ?1 ORDER BY created_at"
@@ -59,7 +60,7 @@ impl RawMemoryStore for SqliteRawMemoryStore {
     }
 
     fn list_by_workspace(&self, workspace_id: &str, limit: usize) -> MemoryResult<Vec<RawMemory>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT memory_id, workspace_id, session_id, role, content, source_type, source_ref, created_at
              FROM raw_memory WHERE workspace_id = ?1 ORDER BY created_at DESC LIMIT ?2"

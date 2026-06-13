@@ -145,6 +145,7 @@ impl ConceptStore for SqliteConceptStore {
             placeholders.join(", ")
         );
         conn.execute(&sql, params_from_iter(concept_params(concept)))?;
+        sync_entity_concepts(&conn, concept)?;
         Ok(())
     }
 
@@ -199,6 +200,7 @@ impl ConceptStore for SqliteConceptStore {
                 concept_id: concept.concept_id.clone(),
             });
         }
+        sync_entity_concepts(&conn, concept)?;
         Ok(())
     }
 
@@ -211,14 +213,17 @@ impl ConceptStore for SqliteConceptStore {
         if entities.is_empty() {
             return Ok(vec![]);
         }
-        let conditions: Vec<String> = entities
-            .iter()
-            .enumerate()
-            .map(|(i, _)| format!("related_entities_json LIKE '%' || ?{} || '%'", i + 3))
-            .collect();
+        let cols = concept_cols_qualified();
+        let placeholders: Vec<String> =
+            (0..entities.len()).map(|i| format!("?{}", i + 3)).collect();
+        // Exact-match JOIN replaces substring LIKE on related_entities_json,
+        // so searching "user" no longer matches "user_profile" (C2).
         let sql = format!(
-            "SELECT {CONCEPT_COLUMNS} FROM concept WHERE workspace_id = ?1 AND status = ?2 AND related_entities_json IS NOT NULL AND ({}) ORDER BY confidence DESC",
-            conditions.join(" OR ")
+            "SELECT DISTINCT {cols} FROM concept c \
+             JOIN entity_concept ec ON ec.concept_id = c.concept_id \
+             WHERE c.workspace_id = ?1 AND c.status = ?2 AND ec.entity IN ({}) \
+             ORDER BY c.confidence DESC",
+            placeholders.join(", ")
         );
         let mut p: Vec<Box<dyn rusqlite::ToSql>> = vec![
             Box::new(workspace_id.to_string()),
@@ -365,5 +370,128 @@ fn parse_concept_type(s: &str) -> ConceptType {
         "task_state" => ConceptType::TaskState,
         "preference" => ConceptType::Preference,
         _ => ConceptType::Architecture,
+    }
+}
+
+/// Concept columns qualified with the `c.` alias for JOIN queries.
+fn concept_cols_qualified() -> String {
+    CONCEPT_COLUMNS
+        .split(", ")
+        .map(|c| format!("c.{c}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Parse a concept's `related_entities_json` into entity strings.
+fn parse_entities(json: &Option<String>) -> Vec<String> {
+    json.as_deref()
+        .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok())
+        .unwrap_or_default()
+}
+
+/// Rebuild the entity_concept join table for a concept (delete + reinsert).
+fn sync_entity_concepts(conn: &Connection, concept: &Concept) -> MemoryResult<()> {
+    conn.execute(
+        "DELETE FROM entity_concept WHERE concept_id = ?1",
+        params![&concept.concept_id],
+    )?;
+    for entity in parse_entities(&concept.related_entities_json) {
+        conn.execute(
+            "INSERT OR IGNORE INTO entity_concept (entity, concept_id, workspace_id) VALUES (?1, ?2, ?3)",
+            params![entity, &concept.concept_id, &concept.workspace_id],
+        )?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::status::ConceptStatus;
+    use crate::store::connection::Database;
+
+    fn make_concept(id: &str, ws: &str, entities: &[&str]) -> Concept {
+        Concept {
+            concept_id: id.to_string(),
+            workspace_id: ws.to_string(),
+            name: id.to_string(),
+            concept_type: None,
+            definition: None,
+            related_entities_json: Some(serde_json::to_string(entities).unwrap()),
+            known_facts_json: None,
+            rejected_hypotheses_json: None,
+            open_questions_json: None,
+            evidence_json: None,
+            confidence: 0.8,
+            evidence_alpha: 1.0,
+            evidence_beta: 1.0,
+            status: ConceptStatus::Active,
+            parent_concept_id: None,
+            hierarchy_depth: 0,
+            last_recalled_at: None,
+            recall_count: 0,
+            successful_recall_count: 0,
+            failed_recall_count: 0,
+            connection_count: 0,
+            created_at: "2026-06-13T00:00:00Z".to_string(),
+            updated_at: "2026-06-13T00:00:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn find_by_entities_no_false_positives() {
+        let db = Database::open_in_memory().unwrap();
+        let store = SqliteConceptStore::new(db.conn.clone());
+
+        // Concept whose only entity is "user_profile"
+        let concept = make_concept("c1", "ws", &["user_profile"]);
+        store.insert_concept(&concept).unwrap();
+
+        // Searching for "user" must NOT match "user_profile" (the old LIKE bug)
+        let hits = store.find_by_entities(&["user".to_string()], "ws").unwrap();
+        assert!(
+            hits.is_empty(),
+            "false positive: 'user' matched concept with entity 'user_profile'"
+        );
+
+        // Exact entity match still works
+        let hits = store
+            .find_by_entities(&["user_profile".to_string()], "ws")
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].concept_id, "c1");
+    }
+
+    #[test]
+    fn update_concept_syncs_entities() {
+        let db = Database::open_in_memory().unwrap();
+        let store = SqliteConceptStore::new(db.conn.clone());
+
+        let mut concept = make_concept("c2", "ws", &["alpha"]);
+        store.insert_concept(&concept).unwrap();
+        assert_eq!(
+            store
+                .find_by_entities(&["alpha".to_string()], "ws")
+                .unwrap()
+                .len(),
+            1
+        );
+
+        // Update changes the entity set
+        concept.related_entities_json = Some(serde_json::to_string(&["beta"]).unwrap());
+        store.update_concept(&concept).unwrap();
+
+        // Old entity no longer matches; new one does
+        assert!(store
+            .find_by_entities(&["alpha".to_string()], "ws")
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            store
+                .find_by_entities(&["beta".to_string()], "ws")
+                .unwrap()
+                .len(),
+            1
+        );
     }
 }

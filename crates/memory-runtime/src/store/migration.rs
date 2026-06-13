@@ -2,9 +2,12 @@ use rusqlite::Connection;
 
 use crate::error::MemoryResult;
 
-const CURRENT_VERSION: u32 = 1;
+const CURRENT_VERSION: u32 = 2;
 
-const MIGRATIONS: &[(u32, &str)] = &[(1, include_str!("../migrations/001_initial.sql"))];
+const MIGRATIONS: &[(u32, &str)] = &[
+    (1, include_str!("../migrations/001_initial.sql")),
+    (2, include_str!("../migrations/002_entity_concept.sql")),
+];
 
 pub fn run_migrations(conn: &Connection) -> MemoryResult<()> {
     let current: u32 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;

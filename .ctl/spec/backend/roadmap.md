@@ -70,10 +70,11 @@ gantt
 | 项 | 值 |
 |---|---|
 | 问题 | C2: `LIKE '%?%'` 搜索 JSON 产生假阳性 |
-| 修复 | 新增 `entity_concept` 连接表，`find_by_entities` 改用 JOIN 查询 |
-| 文件 | `concept_store.rs`, `migrations/002_entity_concept.sql` |
+| 修复 | 新增 `entity_concept` 连接表（migration 002，WITHOUT ROWID），`find_by_entities` 改用 JOIN；insert/update_concept 同步连接表 |
+| 文件 | `concept_store.rs`, `migrations/002_entity_concept.sql`, `migration.rs` |
 | 验收 | 搜索 "user" 不再匹配 "user_profile" |
-| 依赖 | P0-B（可能需要共享连接写入连接表） |
+| 依赖 | P0-B |
+| 状态 | ✅ 已完成 (`p0c-entity-concept-table`) — 37 tests pass，2 gates PASS |
 
 ### P0-D: Store trait 类型安全
 

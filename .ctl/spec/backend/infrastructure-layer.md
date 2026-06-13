@@ -106,16 +106,19 @@ let store = SqliteRawMemoryStore::new(db.conn);  // db.conn 被 move
 
 **修复**: `Database` 持有 `Arc<Mutex<Connection>>`，store clone Arc。
 
-### C2: find_by_entities 用 LIKE 搜索 JSON — 假阳性
+### C2: find_by_entities 用 LIKE 搜索 JSON — 假阳性 ✅ 已修复 (P0-C)
+
+~~原实现用 `related_entities_json LIKE '%' || ? || '%'` 子串匹配~~。现已改为 `entity_concept` 连接表（migration 002）+ JOIN 精确匹配：
 
 ```rust
-// concept_store.rs:191
-format!("related_entities_json LIKE '%' || ?{} || '%'", i + 3)
+// concept_store.rs — find_by_entities
+"SELECT DISTINCT {cols} FROM concept c \
+ JOIN entity_concept ec ON ec.concept_id = c.concept_id \
+ WHERE c.workspace_id = ?1 AND c.status = ?2 AND ec.entity IN ({placeholders})"
 ```
 
-- `LIKE '%user%'` 匹配 `user_profile`、`superuser_config`
-- 全表扫描，无法利用索引
-**修复**: 实体→概念连接表，或 rusqlite JSON1 扩展。
+- `insert_concept` / `update_concept` 调用 `sync_entity_concepts()` 重建连接表行
+- 搜索 "user" 不再匹配 "user_profile"；利用 `(workspace_id, entity)` 索引
 
 ### H1: update_status 接受裸 `&str`
 

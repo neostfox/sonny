@@ -79,9 +79,9 @@ Concept Promotion / Review  ❌ 未实现
 | 设计要求 | 代码位置 | 状态 | Gap |
 |---------|---------|------|-----|
 | subject-predicate-object 三元组 | `models/observation.rs` | ✅ | |
-| 表达 A包含B、A不包含B、A依赖B 等 | predicate 字段自由文本 | ⚠️ | 无类型约束，LLM 自由发挥 |
+| 表达 A包含B、A不包含B、A依赖B 等 | `models/predicate.rs` `Predicate` 枚举 + `normalize_predicate` | ✅ | p2e: 7 canonical 谓词 + 同义词归一；未知回退不 drop |
 | 区分用户确认 vs 助手推测 | `ObservationSourceType` | ✅ | |
-| 表达排障路径、任务状态、被否定假设 | 三元组结构不支持 | ❌ | **D2**: 三元组太弱 |
+| 表达排障路径、任务状态、被否定假设 | `memory_type_candidate` + `Predicate` + `UserNegation` | ✅ | p2e 谓词归一（`causes` 表根因）+ p1d memory_type 覆盖任务状态/偏好/架构 |
 | memory_type_candidate | `observation.memory_type_candidate` | ✅ | p1d 落地 |
 | surprise_score | `observation.surprise_score` | ⚠️ | 字段存在，永远默认 0.5 |
 
@@ -133,10 +133,11 @@ Concept Promotion / Review  ❌ 未实现
 |-------|---------|---------|------|
 | Observe | 从历史 session 提取原始观察 | `pipeline/ingest.rs` | ✅ |
 | Extract | 从 RawMemory 提取 Observation | `pipeline/extract.rs` | ✅ |
+| Embed | 生成 1024 维语义向量并持久化 | `embed/`, `store/embedding_store.rs`, migration 006 | ✅ P3-A |
 | Cluster | 按实体重叠、任务连续性等聚类 | 不存在 | ❌ **D1** |
 | Name | 为候选主题生成概念名称 | 不存在 | ❌ |
 | Link | 连接实体、事实、假设、偏好 | 不存在 | ❌ |
-| Validate | 证据升权/降权 | `confidence/mod.rs` | ⚠️ 数学模型在，无调用 **D5** |
+| Validate | 证据升权/降权 | `confidence/mod.rs` + `extract_and_dedup()` | ✅ P3-D（跨 session 留 consolidation） |
 | Promote | Candidate → Concept 升级 | 不存在 | ❌ |
 | Use | 基于概念召回上下文 | `recall/` stub | ❌ **D8** |
 | Revise | 反馈修正概念边界 | `feedback/` stub | ❌ **D9** |
@@ -147,7 +148,7 @@ Concept Promotion / Review  ❌ 未实现
 
 ## §7 Trellis 组织方式
 
-设计建议的 `.trellis/spec/memory-runtime/` 目录不存在。Spec 内容在本 `.ctl/spec/` 中维护。
+memory-runtime 详细设计已迁移至 [../memory-runtime/](../memory-runtime/index.md)（concept-growth / quality-control / recall-design / memory-model）。本目录维护通用 backend 规范 + roadmap + design-status。
 
 ## §8 Claude Code 实现约束
 

@@ -137,8 +137,7 @@ impl RawMemoryStore for SqliteRawMemoryStore {
 fn parse_source_type(s: &str) -> SourceType {
     match s {
         "session_file" => SourceType::SessionFile,
-        "trellis_journal" => SourceType::TrellisJournal,
-        "trellis_task" => SourceType::TrellisTask,
+        "journal" => SourceType::Journal,
         "user_input" => SourceType::UserInput,
         "manual" => SourceType::Manual,
         _ => {

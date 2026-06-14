@@ -14,6 +14,10 @@ const MIGRATIONS: &[(u32, &str)] = &[
         5,
         include_str!("../migrations/005_p2d_reverse_correction.sql"),
     ),
+    (
+        6,
+        include_str!("../migrations/006_p3a_embedding_storage.sql"),
+    ),
 ];
 
 pub fn run_migrations(conn: &Connection) -> MemoryResult<()> {

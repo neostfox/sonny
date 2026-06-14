@@ -50,6 +50,24 @@ static OBS_FIND_COCLAIM: LazyLock<String> = LazyLock::new(|| {
         ) ORDER BY created_at ASC"
     )
 });
+// P3-D: dedup matches LIVE observations only — a superseded/rejected row is not a
+// "duplicate" of a fresh extraction, and bumping a dead row's evidence would be wrong.
+static OBS_FIND_DUP_OBJ: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "SELECT {OBS_COLUMNS} FROM observation \
+         WHERE workspace_id = ?1 AND subject_text = ?2 AND predicate = ?3 AND object_text = ?4 \
+           AND status NOT IN ('superseded','rejected','deprecated') \
+         ORDER BY created_at ASC LIMIT 1"
+    )
+});
+static OBS_FIND_DUP_NULL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "SELECT {OBS_COLUMNS} FROM observation \
+         WHERE workspace_id = ?1 AND subject_text = ?2 AND predicate = ?3 AND object_text IS NULL \
+           AND status NOT IN ('superseded','rejected','deprecated') \
+         ORDER BY created_at ASC LIMIT 1"
+    )
+});
 
 impl ObservationStore for SqliteObservationStore {
     fn insert(&self, obs: &Observation) -> MemoryResult<()> {
@@ -125,28 +143,32 @@ impl ObservationStore for SqliteObservationStore {
         collect_rows(&conn, &OBS_FIND_BY_ENTITY, params![workspace_id, entity])
     }
 
-    fn check_duplicate(
+    fn find_duplicate(
         &self,
         subject: &str,
         predicate: &str,
         object: Option<&str>,
         workspace_id: &str,
-    ) -> MemoryResult<bool> {
+    ) -> MemoryResult<Option<Observation>> {
         let conn = self.conn.lock();
-        let count: i64 = if let Some(object) = object {
+        let result = if let Some(object) = object {
             conn.query_row(
-                "SELECT COUNT(*) FROM observation WHERE workspace_id = ?1 AND subject_text = ?2 AND predicate = ?3 AND object_text = ?4",
+                &OBS_FIND_DUP_OBJ,
                 params![workspace_id, subject, predicate, object],
-                |r| r.get(0),
-            )?
+                row_to_observation,
+            )
         } else {
             conn.query_row(
-                "SELECT COUNT(*) FROM observation WHERE workspace_id = ?1 AND subject_text = ?2 AND predicate = ?3 AND object_text IS NULL",
+                &OBS_FIND_DUP_NULL,
                 params![workspace_id, subject, predicate],
-                |r| r.get(0),
-            )?
+                row_to_observation,
+            )
         };
-        Ok(count > 0)
+        match result {
+            Ok(obs) => Ok(Some(obs)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
     }
 
     fn find_coclaim(&self, observation_id: &str) -> MemoryResult<Vec<Observation>> {

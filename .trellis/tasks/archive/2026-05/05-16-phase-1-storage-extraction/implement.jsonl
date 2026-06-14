@@ -1,9 +1,0 @@
-{"file": ".trellis/spec/memory-runtime/roadmap.md", "reason": "Phase 1 task definitions (1.1-1.6), acceptance criteria, dependency list"}
-{"file": ".trellis/spec/memory-runtime/principles.md", "reason": "Core design principles: no NER, evidence required, assistant speculation rules"}
-{"file": ".trellis/spec/memory-runtime/concept-growth.md", "reason": "Pipeline stages 1-2: Observe + Extract signatures, input sources, output format"}
-{"file": ".trellis/spec/memory-runtime/quality-control.md", "reason": "Beta-Bernoulli confidence model, evidence weight table (13 types), implementation pseudocode"}
-{"file": ".trellis/spec/memory-runtime/memory-model.md", "reason": "DB schema: all tables, entity_alias table, Observation/RawMemory fields, status lifecycle"}
-{"file": ".trellis/tasks/05-16-phase-1-storage-extraction/prd.md", "reason": "Phase 1 PRD with requirements, acceptance criteria, technical approach, dependency list"}
-{"file": ".trellis/tasks/05-16-phase-1-storage-extraction/research/markdown-parsing.md", "reason": "pulldown-cmark usage, Trellis journal format analysis, SessionParser trait design, code examples"}
-{"file": ".trellis/tasks/05-16-phase-1-storage-extraction/research/entity-normalization.md", "reason": "7-step normalization pipeline, alias table lookup strategy, strsim fuzzy matching, suffix lists"}
-{"file": ".trellis/tasks/05-16-phase-1-storage-extraction/research/llm-extraction-prompts.md", "reason": "Extraction prompt architecture, 5 few-shot examples, JSON schema, language handling rules"}

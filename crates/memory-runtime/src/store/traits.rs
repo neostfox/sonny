@@ -31,13 +31,17 @@ pub trait ObservationStore: Send + Sync {
     /// P2-C: observations co-claimed with `observation_id` in the same extraction batch.
     /// Returns siblings reachable via the `observation_coclaim` adjacency table.
     fn find_coclaim(&self, observation_id: &str) -> MemoryResult<Vec<Observation>>;
-    fn check_duplicate(
+    /// Find an existing LIVE observation matching (subject, predicate, object) in the
+    /// workspace. Used by dedup to decide whether a freshly extracted observation is a
+    /// repeat — and to return the match so its evidence can be accumulated.
+    /// Returns the oldest live match (excludes superseded/rejected/deprecated rows).
+    fn find_duplicate(
         &self,
         subject: &str,
         predicate: &str,
         object: Option<&str>,
         workspace_id: &str,
-    ) -> MemoryResult<bool>;
+    ) -> MemoryResult<Option<Observation>>;
     /// P2-D: atomically supersede a session's live observations and insert the
     /// replacement batch in one transaction. `superseded_by` is derived from the new
     /// batch (NULL if empty). Returns the number of rows superseded.

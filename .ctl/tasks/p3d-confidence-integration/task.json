@@ -7,7 +7,7 @@
   "is_archived": false,
   "is_held": false,
   "last_event_seq": 1,
-  "objective": "Confidence pipeline 集成：extract 后按 source_type 调 update，重复检测调 RepeatedOccurrence，后台 decay 任务",
+  "objective": "Confidence pipeline 集成：extract 按 source_type 种子 α/β，去重命中累加 RepeatedOccurrence；decay 已移至 P4-C（召回侧乘性因子，不碰 α/β）",
   "phase": "planning",
   "read_scope": [
     "crates/memory-runtime/src/confidence/mod.rs",

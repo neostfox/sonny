@@ -13,9 +13,9 @@ pub trait SessionParser: Send + Sync {
     fn can_parse(&self, content: &str, filename: &str) -> bool;
 }
 
-pub struct TrellisJournalParser;
+pub struct JournalParser;
 
-impl SessionParser for TrellisJournalParser {
+impl SessionParser for JournalParser {
     fn parse(
         &self,
         content: &str,
@@ -113,8 +113,8 @@ impl SessionParser for TrellisJournalParser {
         Ok(memories)
     }
 
-    fn can_parse(&self, content: &str, filename: &str) -> bool {
-        content.starts_with("# Journal") || filename.contains(".trellis/workspace/")
+    fn can_parse(&self, content: &str, _filename: &str) -> bool {
+        content.starts_with("# Journal")
     }
 }
 
@@ -188,7 +188,7 @@ pub fn detect_and_parse(
     source_ref: &str,
 ) -> MemoryResult<Vec<RawMemory>> {
     let parsers: Vec<Box<dyn SessionParser>> =
-        vec![Box::new(TrellisJournalParser), Box::new(JsonSessionParser)];
+        vec![Box::new(JournalParser), Box::new(JsonSessionParser)];
 
     for parser in &parsers {
         if parser.can_parse(content, filename) {
@@ -215,7 +215,7 @@ fn make_raw_memory(
         session_id: session_id.to_string(),
         role: section.to_string(),
         content: content.trim().to_string(),
-        source_type: SourceType::TrellisJournal,
+        source_type: SourceType::Journal,
         source_ref: source_ref.to_string(),
         extraction_version: None,
         created_at: if date.is_empty() {
@@ -274,7 +274,7 @@ mod tests {
     }
 
     #[test]
-    fn trellis_journal_parse() {
+    fn journal_parse() {
         let journal = r#"# Journal - test (Part 1)
 
 > AI development session journal
@@ -306,9 +306,7 @@ This is a test summary.
 
 Another summary.
 "#;
-        let result = TrellisJournalParser
-            .parse(journal, "ws1", "journal.md")
-            .unwrap();
+        let result = JournalParser.parse(journal, "ws1", "journal.md").unwrap();
         assert!(
             result.len() >= 2,
             "Should have at least 2 sections from session 1"
@@ -321,13 +319,13 @@ Another summary.
     fn detect_json_format() {
         let json = r#"{"session_id": "x", "messages": []}"#;
         assert!(JsonSessionParser.can_parse(json, "test.json"));
-        assert!(!TrellisJournalParser.can_parse(json, "test.json"));
+        assert!(!JournalParser.can_parse(json, "test.json"));
     }
 
     #[test]
-    fn detect_trellis_format() {
+    fn detect_journal_format() {
         let journal = "# Journal - test";
-        assert!(TrellisJournalParser.can_parse(journal, "journal.md"));
+        assert!(JournalParser.can_parse(journal, "journal.md"));
         assert!(!JsonSessionParser.can_parse(journal, "journal.md"));
     }
 }

@@ -23,8 +23,16 @@ pub struct LlmConfig {
 
 #[derive(Debug, Clone)]
 pub struct EmbeddingConfig {
+    /// Optional embedding-specific OpenAI-compatible API base URL. Empty means: fall
+    /// back to `LlmConfig.api_url` (same provider/server serves chat + embeddings).
+    pub api_url: String,
+    /// Optional embedding-specific API key. Empty means: fall back to `LlmConfig.api_key`.
+    pub api_key: String,
+    /// Embedding model name sent to `/v1/embeddings`.
     pub model_id: String,
+    /// Vector dimension. Must match the model; changing it requires full re-embed.
     pub dim: usize,
+    pub timeout_secs: u64,
     pub prefer_vec: bool,
 }
 
@@ -98,8 +106,18 @@ impl LlmConfig {
 impl EmbeddingConfig {
     fn defaults() -> Self {
         Self {
-            model_id: "BAAI/bge-small-zh-v1.5".into(),
-            dim: 512,
+            api_url: std::env::var("SONNY_EMBEDDING_API_URL").unwrap_or_default(),
+            api_key: std::env::var("SONNY_EMBEDDING_API_KEY").unwrap_or_default(),
+            model_id: std::env::var("SONNY_EMBEDDING_MODEL")
+                .unwrap_or_else(|_| "BAAI/bge-m3".into()),
+            dim: std::env::var("SONNY_EMBEDDING_DIM")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(1024),
+            timeout_secs: std::env::var("SONNY_EMBEDDING_TIMEOUT_SECS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(60),
             prefer_vec: true,
         }
     }

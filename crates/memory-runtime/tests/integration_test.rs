@@ -1,14 +1,19 @@
 use memory_runtime::confidence::{BetaConfidence, EvidenceType};
+use memory_runtime::embed::embed_and_store;
+use memory_runtime::embed::traits::EmbeddingProvider;
 use memory_runtime::entity::canonical_key;
+use memory_runtime::models::embedding::EmbeddingSourceType;
 use memory_runtime::models::observation::{Observation, ObservationSourceType};
 use memory_runtime::models::raw_memory::{RawMemory, SourceType};
 use memory_runtime::models::status::ObservationStatus;
 use memory_runtime::pipeline::extract::extract_observations;
-use memory_runtime::pipeline::ingest::{detect_and_parse, SessionParser, TrellisJournalParser};
+use memory_runtime::pipeline::ingest::{detect_and_parse, JournalParser, SessionParser};
 use memory_runtime::store::connection::Database;
+use memory_runtime::store::embedding_store::SqliteEmbeddingStore;
 use memory_runtime::store::observation_store::SqliteObservationStore;
 use memory_runtime::store::raw_memory_store::SqliteRawMemoryStore;
-use memory_runtime::store::traits::{ObservationStore, RawMemoryStore};
+use memory_runtime::store::traits::{EmbeddingStore, ObservationStore, RawMemoryStore};
+use memory_test_fixtures::stub_embedding::StubEmbeddingService;
 
 fn make_test_raw_memory(
     workspace_id: &str,
@@ -43,6 +48,45 @@ fn seed_raw_memories(conn: &rusqlite::Connection, memories: &[RawMemory]) {
     }
 }
 
+#[tokio::test]
+async fn test_embedding_provider_store_search_roundtrip() {
+    let db = Database::open_in_memory().unwrap();
+    let emb_store = SqliteEmbeddingStore::new(db.conn.clone());
+    let emb = StubEmbeddingService::new(1024);
+
+    embed_and_store(
+        &emb,
+        &emb_store,
+        EmbeddingSourceType::Observation,
+        "obs-posmask",
+        "ws",
+        "POSMASK not_has 机器字段",
+    )
+    .await
+    .unwrap();
+    embed_and_store(
+        &emb,
+        &emb_store,
+        EmbeddingSourceType::Observation,
+        "obs-other",
+        "ws",
+        "ORDERHDR has 金额字段",
+    )
+    .await
+    .unwrap();
+
+    let query = emb.embed("POSMASK not_has 机器字段").await.unwrap();
+    let hits = emb_store
+        .search(query.as_slice().unwrap(), "ws", 2, 0.0)
+        .unwrap();
+
+    assert_eq!(emb.dim(), 1024);
+    assert_eq!(hits.len(), 2);
+    assert_eq!(hits[0].source_id, "obs-posmask");
+    assert_eq!(hits[0].source_type, EmbeddingSourceType::Observation);
+    assert!(hits[0].score > hits[1].score);
+}
+
 #[test]
 fn test_full_pipeline_json_ingest_to_store() {
     let db = Database::open_in_memory().unwrap();
@@ -74,7 +118,7 @@ fn test_full_pipeline_json_ingest_to_store() {
         memory_id: memories[0].memory_id.clone(),
         subject_text: "POSMASK".to_string(),
         subject_type: Some("database_table".to_string()),
-        predicate: "not_has_field".to_string(),
+        predicate: "not_has".to_string(),
         object_text: Some("机器字段".to_string()),
         object_type: Some("field".to_string()),
         evidence_text: Some("POSMASK 表没有机器字段".to_string()),
@@ -96,7 +140,7 @@ fn test_full_pipeline_json_ingest_to_store() {
     // Step 4: Retrieve and verify
     let retrieved_obs = obs_store.get(&obs.observation_id).unwrap().unwrap();
     assert_eq!(retrieved_obs.subject_text, "POSMASK");
-    assert_eq!(retrieved_obs.predicate, "not_has_field");
+    assert_eq!(retrieved_obs.predicate, "not_has");
 
     let all_obs = obs_store.list_by_workspace("test_ws", None).unwrap();
     assert_eq!(all_obs.len(), 1);
@@ -104,14 +148,14 @@ fn test_full_pipeline_json_ingest_to_store() {
     let by_entity = obs_store.find_by_entity("POSMASK", "test_ws").unwrap();
     assert_eq!(by_entity.len(), 1);
 
-    let is_dup = obs_store
-        .check_duplicate("POSMASK", "not_has_field", Some("机器字段"), "test_ws")
+    let dup = obs_store
+        .find_duplicate("POSMASK", "not_has", Some("机器字段"), "test_ws")
         .unwrap();
-    assert!(is_dup);
+    assert!(dup.is_some());
     let not_dup = obs_store
-        .check_duplicate("OTHER", "not_has_field", Some("机器字段"), "test_ws")
+        .find_duplicate("OTHER", "not_has_field", Some("机器字段"), "test_ws")
         .unwrap();
-    assert!(!not_dup);
+    assert!(not_dup.is_none());
 }
 
 #[test]
@@ -135,7 +179,7 @@ fn test_entity_normalization_integration() {
 }
 
 #[test]
-fn test_trellis_journal_ingest() {
+fn test_journal_ingest() {
     let journal = r#"# Journal - test (Part 1)
 
 ## Session 1: Test Session
@@ -153,14 +197,12 @@ This is a test summary with some technical details.
 - Fixed auth handler bug
 "#;
 
-    let memories = TrellisJournalParser
-        .parse(journal, "ws1", "journal.md")
-        .unwrap();
+    let memories = JournalParser.parse(journal, "ws1", "journal.md").unwrap();
     assert!(!memories.is_empty());
     assert!(memories.iter().all(|m| m.workspace_id == "ws1"));
     assert!(memories
         .iter()
-        .all(|m| m.source_type == SourceType::TrellisJournal));
+        .all(|m| m.source_type == SourceType::Journal));
 }
 
 #[tokio::test]
@@ -178,7 +220,7 @@ async fn test_extract_with_mock_llm() {
     assert_eq!(observations.len(), 1);
     // subject_text normalized via canonical_key_light ("POSMASK" -> "posmask")
     assert_eq!(observations[0].subject_text, "posmask");
-    assert_eq!(observations[0].predicate, "not_has_field");
+    assert_eq!(observations[0].predicate, "not_has");
     assert_eq!(
         observations[0].source_type,
         ObservationSourceType::UserMessage
@@ -194,7 +236,7 @@ async fn test_extract_and_dedup_filters_duplicates() {
     let raw = make_test_raw_memory("ws", "s1", "user", "POSMASK 表没有机器字段");
     {
         let conn = db.conn.lock();
-        seed_raw_memories(&conn, &[raw.clone()]);
+        seed_raw_memories(&conn, std::slice::from_ref(&raw));
     }
     let obs_store = SqliteObservationStore::new(db.conn.clone());
     let mock = MockLlmProvider::new().with_response(
@@ -203,19 +245,26 @@ async fn test_extract_and_dedup_filters_duplicates() {
     );
 
     // First extraction: store empty -> keeps the observation.
-    let first = extract_and_dedup(&[raw.clone()], &mock, &obs_store)
+    let first = extract_and_dedup(std::slice::from_ref(&raw), &mock, &obs_store)
         .await
         .unwrap();
     assert_eq!(first.len(), 1);
     obs_store.insert_batch(&first).unwrap();
 
-    // Re-extracting identical content: subject normalizes to the same "posmask" key,
-    // check_duplicate hits -> dropped.
+    // Re-extracting identical content: find_duplicate hits -> the fresh duplicate is
+    // dropped AND the existing observation's evidence is accumulated (P3-D).
+    let existing_id = first[0].observation_id.clone();
     let second = extract_and_dedup(&[raw], &mock, &obs_store).await.unwrap();
     assert!(
         second.is_empty(),
         "re-extraction of identical content should yield no new observations"
     );
+
+    // UserMessage seeds no evidence (α stays 1.0); the dedup repeat adds
+    // RepeatedOccurrence (+1.0 α), so the existing observation's α is now 2.0.
+    let bumped = obs_store.get(&existing_id).unwrap().unwrap();
+    assert_eq!(bumped.evidence_alpha, 2.0);
+    assert_eq!(bumped.evidence_beta, 1.0);
 }
 
 #[test]
@@ -437,7 +486,9 @@ async fn test_reextract_supersedes_old_observations() {
         "POSMASK",
         r#"{"observations":[{"subject_text":"POSMASK","predicate":"has_field","object_text":"机器字段","evidence_text":"POSMASK 表没有机器字段","source_type":"user_message"}]}"#,
     );
-    let first = extract_observations(&[raw.clone()], &v1).await.unwrap();
+    let first = extract_observations(std::slice::from_ref(&raw), &v1)
+        .await
+        .unwrap();
     assert_eq!(first.len(), 1);
     obs_store.insert_batch(&first).unwrap();
     // Simulate a prior extraction with an older prompt version.
@@ -479,7 +530,7 @@ async fn test_reextract_supersedes_old_observations() {
         .list_by_workspace("ws", Some(ObservationStatus::Candidate))
         .unwrap();
     assert_eq!(active.len(), 1);
-    assert_eq!(active[0].predicate, "not_has_field");
+    assert_eq!(active[0].predicate, "not_has");
     let superseded = obs_store
         .list_by_workspace("ws", Some(ObservationStatus::Superseded))
         .unwrap();

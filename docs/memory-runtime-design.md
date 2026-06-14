@@ -1,6 +1,6 @@
 # Memory Runtime 技术设计文档
 
-> 目标：指导 Trellis 与 Claude Code 协同实现一个面向 Coding Agent 的长期记忆系统。该系统的核心不是保存历史文本，而是从历史经历中生长出概念网络，并在未来任务中精准召回。
+> 目标：指导实现一个面向 Coding Agent 的长期记忆系统。该系统的核心不是保存历史文本，而是从历史经历中生长出概念网络，并在未来任务中精准召回。
 
 ---
 
@@ -75,7 +75,7 @@ Memory Runtime 要让 Claude Code / Codex / OpenCode 等 Coding Agent 具备以�
 系统如何生成概念
 系统如何召回
 系统如何修正
-Trellis 如何组织任务
+任务如何组织
 Claude Code 如何实现
 ```
 
@@ -167,7 +167,7 @@ status
 ### 3.1 总体流程
 
 ```text
-历史 Session / 当前对话 / Trellis Journal / Task 记录
+历史 Session / 当前对话 / Journal / Task 记录
         ↓
 Memory Ingest
         ↓
@@ -262,8 +262,8 @@ User Feedback
 用户消息
 助手回答
 历史 session
-Trellis journal
-Trellis task
+journal 记录
+task 记录
 项目说明
 Bug 记录
 任务总结
@@ -421,7 +421,7 @@ Instructions:
 
 ### 5.1 Observe
 
-从历史 session、当前对话、Trellis journal、task 文件中提取原始观察。
+从历史 session、当前对话、journal、task 文件中提取原始观察。
 
 输入：
 
@@ -702,33 +702,32 @@ Concept Candidate 满足条件后升级为 Concept。
 
 ---
 
-## 7. Trellis 组织方式
+## 7. Spec 组织方式
 
-Trellis 负责组织工作流、任务、规范和 journal。Memory Runtime 使用 Trellis 作为高质量输入来源。
+项目规范与任务记录由 `.ctl/` 管理。Memory Runtime 的领域设计 spec 在 `.ctl/spec/memory-runtime/`，通用 backend 工程规范在 `.ctl/spec/backend/`，任务记录在 `.ctl/tasks/`。
 
-### 7.1 推荐目录结构
+### 7.1 目录结构
 
 ```text
-.trellis/
+.ctl/
   spec/
     memory-runtime/
+      index.md
       principles.md
       concept-growth.md
       memory-model.md
       recall-design.md
       quality-control.md
+    backend/
+      roadmap.md
+      design-reference.md
+      directory-structure.md
+      ...
 
   tasks/
-    memory-runtime-mvp/
+    <task-id>/
       task.json
-      prd.md
-      research/
-      implement.jsonl
-      check.jsonl
-
-  workspace/<developer>/
-    journal-*.md
-    index.md
+      events.jsonl
 ```
 
 ### 7.2 principles.md
@@ -790,16 +789,17 @@ review
 
 ## 8. Claude Code 实现约束
 
-Claude Code 负责实现 Memory Runtime，但必须遵循 Trellis spec。
+Claude Code 负责实现 Memory Runtime，但必须遵循项目 spec（`.ctl/spec/`）。
 
 ### 8.1 实现前必须读取
 
 ```text
-.trellis/spec/memory-runtime/principles.md
-.trellis/spec/memory-runtime/concept-growth.md
-.trellis/spec/memory-runtime/memory-model.md
-.trellis/spec/memory-runtime/recall-design.md
-.trellis/tasks/memory-runtime-mvp/prd.md
+.ctl/spec/memory-runtime/principles.md
+.ctl/spec/memory-runtime/concept-growth.md
+.ctl/spec/memory-runtime/memory-model.md
+.ctl/spec/memory-runtime/recall-design.md
+.ctl/spec/memory-runtime/quality-control.md
+.ctl/spec/backend/roadmap.md
 ```
 
 ### 8.2 不允许做的事
@@ -835,8 +835,8 @@ Claude Code 负责实现 Memory Runtime，但必须遵循 Trellis spec。
 
 ```text
 历史 session markdown/json
-Trellis journal
-Trellis task/prd
+journal 记录
+task/prd 记录
 用户手动输入片段
 ```
 
@@ -1219,11 +1219,12 @@ Recall 的目标不是"找相似文本"，而是：
 你现在要实现 Memory Runtime MVP。
 
 请先阅读：
-- .trellis/spec/memory-runtime/principles.md
-- .trellis/spec/memory-runtime/concept-growth.md
-- .trellis/spec/memory-runtime/memory-model.md
-- .trellis/spec/memory-runtime/recall-design.md
-- .trellis/tasks/memory-runtime-mvp/prd.md
+- .ctl/spec/memory-runtime/principles.md
+- .ctl/spec/memory-runtime/concept-growth.md
+- .ctl/spec/memory-runtime/memory-model.md
+- .ctl/spec/memory-runtime/recall-design.md
+- .ctl/spec/memory-runtime/quality-control.md
+- .ctl/spec/backend/roadmap.md
 
 第一阶段目标：
 1. 创建本地 SQLite 数据模型。

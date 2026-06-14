@@ -1,16 +1,18 @@
 use serde::Deserialize;
 
+use crate::confidence::{BetaConfidence, EvidenceType};
 use crate::entity::canonical_key_light;
 use crate::error::{MemoryError, MemoryResult};
 use crate::llm::traits::LlmProvider;
 use crate::models::observation::{Observation, ObservationSourceType};
+use crate::models::predicate::normalize_predicate;
 use crate::models::raw_memory::RawMemory;
 use crate::models::status::ObservationStatus;
 use crate::store::traits::{ObservationStore, RawMemoryStore};
 
 /// Prompt version stamped on every extraction. Bump when EXTRACTION_SYSTEM_PROMPT changes;
 /// consumed by P2-D reverse-correction to detect stale extractions needing re-extraction.
-pub const EXTRACTION_PROMPT_VERSION: &str = "2026-06-13.v1";
+pub const EXTRACTION_PROMPT_VERSION: &str = "2026-06-14.v1";
 
 const EXTRACTION_SYSTEM_PROMPT: &str = r#"You are an observation extraction system. Your task is to extract structured knowledge observations from conversation messages.
 
@@ -34,7 +36,7 @@ Output a JSON object with this structure:
     {
       "subject_text": "entity name",
       "subject_type": "entity type or null",
-      "predicate": "relationship (English)",
+      "predicate": "has | not_has | depends_on | not_depends_on | related_to | not_related_to | causes",
       "object_text": "target entity or value",
       "object_type": "target type or null",
       "evidence_text": "exact verbatim quote",
@@ -50,11 +52,22 @@ Output a JSON object with this structure:
 - assistant_guess: The assistant inferred or speculated this
 - file_evidence: Derived from file/project content
 
+## Predicate Vocabulary
+Use ONLY these canonical predicates (snake_case):
+- has: A contains/has field or part B
+- not_has: A does NOT have B (always preserve negative information)
+- depends_on: A depends on/requires B
+- not_depends_on: A does NOT depend on B
+- related_to: A is associated with / may relate to B
+- not_related_to: A is NOT related to B
+- causes: A is the root cause of / leads to B
+Pick the most specific canonical predicate. If none fits, use "related_to".
+
 ## Language Handling
 - Input may contain mixed Chinese and English text
 - Preserve the original language in subject_text, object_text, and evidence_text
 - Do NOT translate any text
-- Predicates must always be in English
+- Predicates must always be one of the canonical values in Predicate Vocabulary above
 - Entity types must always be in English
 
 ## Output ONLY valid JSON. No markdown fences, no explanation.
@@ -65,7 +78,7 @@ Input:
 [user]: POSMASK 表没有机器字段
 
 Output:
-{"observations":[{"subject_text":"POSMASK","subject_type":"database_table","predicate":"not_has_field","object_text":"机器字段","object_type":"field","evidence_text":"POSMASK 表没有机器字段","source_type":"user_message"}]}
+{"observations":[{"subject_text":"POSMASK","subject_type":"database_table","predicate":"not_has","object_text":"机器字段","object_type":"field","evidence_text":"POSMASK 表没有机器字段","source_type":"user_message"}]}
 
 Input:
 [user]: 好的，谢谢
@@ -177,19 +190,26 @@ fn raw_to_observation(
     extraction_batch_id: &str,
 ) -> Observation {
     let source_type = parse_source_type(&raw.source_type);
+    // P3-D: seed fact_confidence from the source's evidence weight. Source *trust* is
+    // already captured by extraction_confidence; this initializes the accumulated
+    // *evidence* dimension. UserMessage seeds nothing — a raw claim awaits corroboration.
+    let mut evidence = BetaConfidence::new();
+    if let Some(et) = source_type.initial_evidence() {
+        evidence.update(&et);
+    }
     Observation {
         observation_id: uuid::Uuid::new_v4().to_string(),
         workspace_id: workspace_id.to_string(),
         memory_id: memory_id.to_string(),
         subject_text: canonical_key_light(&raw.subject_text),
         subject_type: raw.subject_type,
-        predicate: raw.predicate,
+        predicate: normalize_predicate(&raw.predicate),
         object_text: raw.object_text.map(|o| canonical_key_light(&o)),
         object_type: raw.object_type,
         evidence_text: raw.evidence_text,
         extraction_confidence: source_type.extraction_confidence(),
-        evidence_alpha: 1.0,
-        evidence_beta: 1.0,
+        evidence_alpha: evidence.alpha,
+        evidence_beta: evidence.beta,
         status: ObservationStatus::Candidate,
         surprise_score: 0.5,
         source_type,
@@ -213,13 +233,18 @@ pub async fn extract_and_dedup<S: ObservationStore>(
     let mut kept = Vec::with_capacity(extracted.len());
     let mut duplicates = 0;
     for obs in extracted {
-        let is_dup = store.check_duplicate(
+        if let Some(existing) = store.find_duplicate(
             &obs.subject_text,
             &obs.predicate,
             obs.object_text.as_deref(),
             &obs.workspace_id,
-        )?;
-        if is_dup {
+        )? {
+            // Re-encountered fact: accumulate evidence on the existing observation
+            // (P3-D). The fresh duplicate is dropped; the original strengthens.
+            let mut bc =
+                BetaConfidence::with_values(existing.evidence_alpha, existing.evidence_beta);
+            bc.update(&EvidenceType::RepeatedOccurrence);
+            store.update_confidence(&existing.observation_id, bc.alpha, bc.beta)?;
             duplicates += 1;
         } else {
             kept.push(obs);

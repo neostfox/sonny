@@ -186,19 +186,31 @@ gantt
 | 依赖 | P2-A, P2-C |
 | 状态 | ✅ 已完成 (`p2d-reverse-correction-2`；原 `p2d-reverse-correction` 因 scope 漏 `ingest.rs`/`status.rs`/tests 启动后无法 revise，已 cancel+archive) — migration 005 加 `raw_memory.extraction_version` + `observation.superseded_by`；新增 `ObservationStatus::Superseded` 变体；`RawMemoryStore::session_extraction_version`/`set_session_extraction_version` + `ObservationStore::mark_session_superseded`（按 session_id 经 raw_memory 关联定位旧 Observation）；`reextract(session_id)` 用 `extract_observations`（非 dedup，避免旧行干扰）→ 先 mark 旧为 superseded 再插新批 → stamp 当前 `EXTRACTION_PROMPT_VERSION`。旧行保留可追溯，recall 按 status 过滤。48 tests pass，含 reextract 集成测试 |
 
+### P2-E: 谓词词表归一化 ✅
+
+| 项 | 值 |
+|---|---|
+| 问题 | D2: predicate 自由文本，LLM 随意发挥 → 去重/聚类/冲突检测失效（"包含"≠"包括"≠"has_field"） |
+| 实现 | 1. `Predicate` 枚举（7 canonical: has/not_has/depends_on/not_depends_on/related_to/not_related_to/causes）<br/>2. `normalize_predicate()` 在 `raw_to_observation` 归一化 LLM 输出（canonical + 同义词映射；未知谓词回退为小写 snake_case，**不 drop**——未知关系不是幻觉）<br/>3. extraction prompt 列出 canonical 词表引导 LLM<br/>4. `Predicate::is_negation_of()` 为冲突检测铺路（design §3.3）<br/>5. bump `EXTRACTION_PROMPT_VERSION` → 已提取 session 标记 stale，reextract 回填 canonical 谓词 |
+| 文件 | 新文件 `models/predicate.rs`, `pipeline/extract.rs`（prompt + 归一化 + 版本） |
+| 验收 | "has_field"/"contains"/"lacks" 等归一为 canonical；去重/聚类按 canonical 匹配；未知谓词保留不丢 |
+| 依赖 | P2-A（验证层） |
+| 状态 | ✅ 已实现；53 tests pass（含 5 个 predicate 单元测试） |
+
 ---
 
 ## P3: 智能生长（概念从数据中涌现）
 
-### P3-A: Embedding 实现
+### P3-A: Embedding 实现 ✅
 
 | 项 | 值 |
 |---|---|
-| 问题 | 所有 embedding 代码是 stub，聚类和召回依赖它 |
-| 实现 | 实现 `EmbeddingService` trait：本地 ONNX 模型（bge-small-zh）或 API 调用 |
-| 文件 | 新文件 `embed/<provider>_embedding.rs` |
-| 验收 | `embed("测试文本")` 返回 512 维向量；`embed_batch` 正确 |
+| 问题 | 所有 embedding 代码曾是 stub，聚类和召回依赖真实向量 |
+| 实现 | `EmbeddingProvider` 抽象 + OpenAI-compatible `/v1/embeddings` provider；默认 `BAAI/bge-m3`，1024 维；`embed_and_store()` 串起 provider → SQLite store |
+| 文件 | `embed/traits.rs`, `embed/openai.rs`, `embed/mod.rs`, `store/embedding_store.rs`, `migrations/006_p3a_embedding_storage.sql` |
+| 验收 | stub provider 覆盖 embed → store → cosine search；OpenAI-compatible 请求/响应 serde + 维度校验单测 |
 | 依赖 | 无（可与 P2 并行） |
+| 状态 | ✅ 已实现；sqlite-vec 延后为性能优化，当前默认 BLOB + Rust cosine |
 
 ### P3-B: 聚类引擎
 
@@ -220,15 +232,16 @@ gantt
 | 验收 | 两个重叠候选合并为一个；一个过宽候选拆分为两个 |
 | 依赖 | P3-B（聚类引擎） |
 
-### P3-D: Confidence Pipeline 集成
+### P3-D: Confidence Pipeline 集成 ✅
 
 | 项 | 值 |
 |---|---|
-| 问题 | D5: BetaConfidence 无调用者 |
-| 实现 | 1. extract 后根据 source_type 调用 `update()` 设初始值<br/>2. 重复检测时调用 `update(RepeatedOccurrence)`<br/>3. 跨 session 匹配时调用 `update(CrossSession*)`<br/>4. 后台任务扫描 decay |
-| 文件 | `pipeline/extract.rs`, `pipeline/cluster.rs`, 新文件 `pipeline/decay.rs` |
-| 验收 | Observation 的 alpha/beta 不再是初始值；30 天未 recall 的 concept confidence 下降 |
+| 问题 | D5: BetaConfidence 无调用者 → fact_confidence 恒为 0.5 |
+| 实现 | 1. extract 时按 `source_type.initial_evidence()` 种子 α/β（FileEvidence/UserConfirm/UserNegation/AssistantGuess；UserMessage 不种子，等去重/跨 session 佐证）<br/>2. 去重命中（新 `find_duplicate` 返回命中行）对已存在 observation 累加 `update(RepeatedOccurrence)`<br/>3. （Phase 5）跨 session 匹配 `update(CrossSession*)` — 待 consolidation 引擎<br/>~~4. 后台 decay~~ → **移除**：衰减是召回侧乘性因子，不碰 α/β（见 P4-C / quality-control.md §Time Decay） |
+| 文件 | `pipeline/extract.rs`, `store/observation_store.rs`, `store/traits.rs`, `models/observation.rs`, `confidence/mod.rs`（删 `update_with_decay`） |
+| 验收 | 按 source 种子的 observation α/β 反映证据权重（非恒 1.0/1.0）；去重命中的已存在 observation α 累加 RepeatedOccurrence（+1.0） |
 | 依赖 | P2-A（验证层）, P1-C（双维度设计） |
+| 状态 | ✅ 种子 + 去重累加已实现；跨 session 留 Phase 5 |
 
 ---
 
@@ -259,7 +272,7 @@ gantt
 | 项 | 值 |
 |---|---|
 | 问题 | P9: 无时间感知 |
-| 实现 | 1. 每次 recall 更新 `last_recalled_at`<br/>2. 定义衰减公式：`decay_factor = 0.5^(days/90)`<br/>3. `recall_count`/`successful_recall_count` 作为活跃度指标 |
+| 实现 | 1. 每次 recall 更新 `last_recalled_at`（rehearsal 重置遗忘钟）<br/>2. 衰减公式（Ebbinghaus + rehearsal，见 quality-control.md §Time Decay）：`recency = exp(−λ_eff·Δt)`，`λ_eff = (1/decay_half_life_days)/(1+0.5·successful_recall_count)`，Δt 锚 `last_recalled_at`（回退 `created_at`）<br/>3. `recall_count`/`successful_recall_count` 作活跃度 + 减速因子<br/>**注**：衰减是召回侧乘性 vitality 因子，**不**碰 α/β |
 | 文件 | `concept_store.rs`（更新 recall stats）, `recall/mod.rs` |
 | 验收 | 长期未 recall 的 concept 在排序中降权 |
 | 依赖 | P4-A |

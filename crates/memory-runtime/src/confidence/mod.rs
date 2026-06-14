@@ -89,11 +89,6 @@ impl BetaConfidence {
         self.alpha += alpha_delta;
         self.beta += beta_delta;
     }
-
-    pub fn update_with_decay(&mut self, days_inactive: u32) {
-        let scale = days_inactive as f64 / 30.0;
-        self.beta += 0.5 * scale;
-    }
 }
 
 impl fmt::Display for BetaConfidence {
@@ -164,15 +159,6 @@ mod tests {
         assert_eq!(bc.beta, 1.0);
         let expected = 3.3 / 4.3;
         assert!((bc.confidence() - expected).abs() < 1e-6);
-    }
-
-    #[test]
-    fn long_inactivity_decay() {
-        let mut bc = BetaConfidence::new();
-        bc.update(&EvidenceType::UserConfirmation); // alpha = 3.0
-        bc.update_with_decay(60); // beta += 0.5 * (60/30) = 1.0
-        assert_eq!(bc.alpha, 3.0);
-        assert_eq!(bc.beta, 2.0); // 1.0 + 1.0
     }
 
     #[test]

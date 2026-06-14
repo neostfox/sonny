@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::status::ObservationStatus;
+use crate::confidence::EvidenceType;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Observation {
@@ -67,6 +68,21 @@ impl ObservationSourceType {
             Self::UserNegation => 0.8,
             Self::UserMessage => 0.7,
             Self::AssistantGuess => 0.3,
+        }
+    }
+
+    /// Evidence type implied by this source at first extraction, used to seed
+    /// `fact_confidence`. `None` for `UserMessage` — a raw uncorroborated claim
+    /// starts neutral and strengthens via dedup-repeat / cross-session corroboration.
+    /// Source *trust* lives in [`Self::extraction_confidence`]; this seeds the
+    /// accumulated *evidence* dimension (design: dual-dimension confidence).
+    pub fn initial_evidence(&self) -> Option<EvidenceType> {
+        match self {
+            Self::FileEvidence => Some(EvidenceType::FileEvidence),
+            Self::UserConfirm => Some(EvidenceType::UserConfirmation),
+            Self::UserNegation => Some(EvidenceType::UserNegation),
+            Self::AssistantGuess => Some(EvidenceType::AssistantSpeculation),
+            Self::UserMessage => None,
         }
     }
 

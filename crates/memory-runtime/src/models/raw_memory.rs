@@ -19,8 +19,7 @@ pub struct RawMemory {
 #[serde(rename_all = "snake_case")]
 pub enum SourceType {
     SessionFile,
-    TrellisJournal,
-    TrellisTask,
+    Journal,
     UserInput,
     Manual,
 }
@@ -29,8 +28,7 @@ impl SourceType {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::SessionFile => "session_file",
-            Self::TrellisJournal => "trellis_journal",
-            Self::TrellisTask => "trellis_task",
+            Self::Journal => "journal",
             Self::UserInput => "user_input",
             Self::Manual => "manual",
         }
@@ -41,8 +39,7 @@ impl std::str::FromStr for SourceType {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "session_file" => Ok(Self::SessionFile),
-            "trellis_journal" => Ok(Self::TrellisJournal),
-            "trellis_task" => Ok(Self::TrellisTask),
+            "journal" => Ok(Self::Journal),
             "user_input" => Ok(Self::UserInput),
             "manual" => Ok(Self::Manual),
             _ => Err(()),

@@ -6,9 +6,9 @@
   "id": "p3b-cluster-engine",
   "is_archived": false,
   "is_held": false,
-  "last_event_seq": 1,
+  "last_event_seq": 6,
   "objective": "聚类引擎：对 Observation 计算 embedding，HAC 层次聚类，利用实体重叠+共现+embedding 相似度产出 ConceptCandidate",
-  "phase": "planning",
+  "phase": "review",
   "read_scope": [
     "crates/memory-runtime/src/embed",
     "crates/memory-runtime/src/entity",

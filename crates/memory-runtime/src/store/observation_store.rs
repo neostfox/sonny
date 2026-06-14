@@ -24,10 +24,10 @@ const OBS_COLUMNS: &str = "\
     observation_id, workspace_id, memory_id, subject_text, subject_type, \
     predicate, object_text, object_type, evidence_text, extraction_confidence, evidence_alpha, evidence_beta, \
     status, surprise_score, source_type, consolidated, created_at, \
-    memory_type_candidate, observation_detail_json, extraction_batch_id";
+    memory_type_candidate, observation_detail_json, extraction_batch_id, superseded_by";
 
 static OBS_INSERT: LazyLock<String> = LazyLock::new(|| {
-    format!("INSERT INTO observation ({OBS_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)")
+    format!("INSERT INTO observation ({OBS_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)")
 });
 static OBS_GET: LazyLock<String> =
     LazyLock::new(|| format!("SELECT {OBS_COLUMNS} FROM observation WHERE observation_id = ?1"));
@@ -38,9 +38,13 @@ static OBS_FIND_BY_ENTITY: LazyLock<String> = LazyLock::new(|| {
     format!("SELECT {OBS_COLUMNS} FROM observation WHERE workspace_id = ?1 AND (subject_text = ?2 OR object_text = ?2) ORDER BY created_at DESC")
 });
 // P2-C: observations co-claimed with the given one (share an extraction batch edge).
+// F2: exclude dead statuses so clustering (P3-B) never pulls superseded/rejected rows
+// whose coclaim edges linger after re-extraction.
 static OBS_FIND_COCLAIM: LazyLock<String> = LazyLock::new(|| {
     format!(
-        "SELECT {OBS_COLUMNS} FROM observation WHERE observation_id IN (\
+        "SELECT {OBS_COLUMNS} FROM observation \
+         WHERE status NOT IN ('superseded','rejected','deprecated') \
+           AND observation_id IN (\
             SELECT CASE WHEN observation_a = ?1 THEN observation_b ELSE observation_a END \
             FROM observation_coclaim WHERE observation_a = ?1 OR observation_b = ?1\
         ) ORDER BY created_at ASC"
@@ -50,68 +54,15 @@ static OBS_FIND_COCLAIM: LazyLock<String> = LazyLock::new(|| {
 impl ObservationStore for SqliteObservationStore {
     fn insert(&self, obs: &Observation) -> MemoryResult<()> {
         let conn = self.conn.lock();
-        let status = obs.status.as_str();
-        let source = obs.source_type.as_str();
-        conn.execute(
-            &OBS_INSERT,
-            params![
-                &obs.observation_id,
-                &obs.workspace_id,
-                &obs.memory_id,
-                &obs.subject_text,
-                &obs.subject_type,
-                &obs.predicate,
-                &obs.object_text,
-                &obs.object_type,
-                &obs.evidence_text,
-                &obs.extraction_confidence,
-                &obs.evidence_alpha,
-                &obs.evidence_beta,
-                &status,
-                &obs.surprise_score,
-                &source,
-                &obs.consolidated,
-                &obs.created_at,
-                &obs.memory_type_candidate.as_ref().map(|t| t.as_str()),
-                &obs.observation_detail_json,
-                &obs.extraction_batch_id,
-            ],
-        )?;
+        insert_observation(&conn, obs)?;
         Ok(())
     }
     fn insert_batch(&self, observations: &[Observation]) -> MemoryResult<()> {
         let mut conn = self.conn.lock();
         let tx = conn.transaction()?;
         {
-            let sql: &str = &OBS_INSERT;
             for obs in observations {
-                let status = obs.status.as_str();
-                let source = obs.source_type.as_str();
-                tx.execute(
-                    sql,
-                    params![
-                        &obs.observation_id,
-                        &obs.workspace_id,
-                        &obs.memory_id,
-                        &obs.subject_text,
-                        &obs.subject_type,
-                        &obs.predicate,
-                        &obs.object_text,
-                        &obs.object_type,
-                        &obs.evidence_text,
-                        &obs.extraction_confidence,
-                        &obs.evidence_alpha,
-                        &obs.evidence_beta,
-                        &status,
-                        &obs.surprise_score,
-                        &source,
-                        &obs.consolidated,
-                        &obs.created_at,
-                        &obs.memory_type_candidate.as_ref().map(|t| t.as_str()),
-                        &obs.observation_detail_json,
-                        &obs.extraction_batch_id,
-                    ],
-                )?;
+                insert_observation(&tx, obs)?;
             }
             // P2-C: record coclaim co-occurrence edges for observations sharing a batch.
             insert_coclaim_pairs(&tx, observations)?;
@@ -202,6 +153,37 @@ impl ObservationStore for SqliteObservationStore {
         let conn = self.conn.lock();
         collect_rows(&conn, &OBS_FIND_COCLAIM, params![observation_id])
     }
+
+    /// P2-D (F1): atomically supersede a session's live observations and insert the
+    /// replacement batch in ONE transaction. If any step fails, nothing is committed —
+    /// the old observations stay live. `superseded_by` is the replacement batch id, or
+    /// NULL when the new extraction is empty (F3). Returns the count superseded.
+    fn replace_session_observations(
+        &self,
+        session_id: &str,
+        new_observations: &[Observation],
+    ) -> MemoryResult<usize> {
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        // Replacement batch id (NULL when the new extraction yielded nothing).
+        let new_batch: Option<String> = new_observations
+            .first()
+            .and_then(|o| o.extraction_batch_id.clone());
+        // Supersede the old rows first; the new rows aren't inserted yet, so within
+        // this transaction they can't be matched by the UPDATE.
+        let superseded = tx.execute(
+            "UPDATE observation SET status = 'superseded', superseded_by = ?1
+             WHERE status != 'superseded'
+               AND memory_id IN (SELECT memory_id FROM raw_memory WHERE session_id = ?2)",
+            params![&new_batch, session_id],
+        )?;
+        for obs in new_observations {
+            insert_observation(&tx, obs)?;
+        }
+        insert_coclaim_pairs(&tx, new_observations)?;
+        tx.commit()?;
+        Ok(superseded)
+    }
 }
 
 fn collect_rows(
@@ -214,6 +196,40 @@ fn collect_rows(
         .query_map(p, row_to_observation)?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
+}
+
+/// Insert a single observation row. Shared by `insert`, `insert_batch`, and
+/// `replace_session_observations` so the 21-column param list lives in one place.
+fn insert_observation(conn: &Connection, obs: &Observation) -> rusqlite::Result<()> {
+    let status = obs.status.as_str();
+    let source = obs.source_type.as_str();
+    conn.execute(
+        &OBS_INSERT,
+        params![
+            &obs.observation_id,
+            &obs.workspace_id,
+            &obs.memory_id,
+            &obs.subject_text,
+            &obs.subject_type,
+            &obs.predicate,
+            &obs.object_text,
+            &obs.object_type,
+            &obs.evidence_text,
+            &obs.extraction_confidence,
+            &obs.evidence_alpha,
+            &obs.evidence_beta,
+            &status,
+            &obs.surprise_score,
+            &source,
+            &obs.consolidated,
+            &obs.created_at,
+            &obs.memory_type_candidate.as_ref().map(|t| t.as_str()),
+            &obs.observation_detail_json,
+            &obs.extraction_batch_id,
+            &obs.superseded_by,
+        ],
+    )?;
+    Ok(())
 }
 
 /// P2-C: write coclaim co-occurrence edges for observations sharing an extraction batch.
@@ -279,6 +295,7 @@ fn row_to_observation(row: &rusqlite::Row<'_>) -> rusqlite::Result<Observation> 
             .and_then(|s| parse_memory_type(&s)),
         observation_detail_json: row.get(18)?,
         extraction_batch_id: row.get(19)?,
+        superseded_by: row.get(20)?,
     })
 }
 

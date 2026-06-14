@@ -10,6 +10,10 @@ const MIGRATIONS: &[(u32, &str)] = &[
         4,
         include_str!("../migrations/004_p2c_observation_coclaim.sql"),
     ),
+    (
+        5,
+        include_str!("../migrations/005_p2d_reverse_correction.sql"),
+    ),
 ];
 
 pub fn run_migrations(conn: &Connection) -> MemoryResult<()> {

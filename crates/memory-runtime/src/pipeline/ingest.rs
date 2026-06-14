@@ -166,6 +166,7 @@ impl SessionParser for JsonSessionParser {
                 content: msg.content.clone(),
                 source_type: SourceType::SessionFile,
                 source_ref: source_ref.to_string(),
+                extraction_version: None,
                 created_at: session
                     .date
                     .clone()
@@ -216,6 +217,7 @@ fn make_raw_memory(
         content: content.trim().to_string(),
         source_type: SourceType::TrellisJournal,
         source_ref: source_ref.to_string(),
+        extraction_version: None,
         created_at: if date.is_empty() {
             chrono::Utc::now().to_rfc3339()
         } else {

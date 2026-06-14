@@ -10,6 +10,10 @@ pub trait RawMemoryStore: Send + Sync {
     fn insert_batch(&self, raws: &[RawMemory]) -> MemoryResult<()>;
     fn get_by_session(&self, session_id: &str) -> MemoryResult<Vec<RawMemory>>;
     fn list_by_workspace(&self, workspace_id: &str, limit: usize) -> MemoryResult<Vec<RawMemory>>;
+    /// P2-D: prompt version of the last extraction over this session (`None` if never extracted).
+    fn session_extraction_version(&self, session_id: &str) -> MemoryResult<Option<String>>;
+    /// P2-D: stamp the prompt version onto every memory in a session after extraction.
+    fn set_session_extraction_version(&self, session_id: &str, version: &str) -> MemoryResult<()>;
 }
 
 pub trait ObservationStore: Send + Sync {
@@ -34,6 +38,14 @@ pub trait ObservationStore: Send + Sync {
         object: Option<&str>,
         workspace_id: &str,
     ) -> MemoryResult<bool>;
+    /// P2-D: atomically supersede a session's live observations and insert the
+    /// replacement batch in one transaction. `superseded_by` is derived from the new
+    /// batch (NULL if empty). Returns the number of rows superseded.
+    fn replace_session_observations(
+        &self,
+        session_id: &str,
+        new_observations: &[Observation],
+    ) -> MemoryResult<usize>;
 }
 
 pub trait ConceptStore: Send + Sync {

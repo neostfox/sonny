@@ -24,6 +24,7 @@ fn make_test_raw_memory(
         content: content.to_string(),
         source_type: SourceType::SessionFile,
         source_ref: "test".to_string(),
+        extraction_version: None,
         created_at: chrono::Utc::now().to_rfc3339(),
     }
 }
@@ -81,6 +82,7 @@ fn test_full_pipeline_json_ingest_to_store() {
         memory_type_candidate: None,
         observation_detail_json: None,
         extraction_batch_id: None,
+        superseded_by: None,
         evidence_alpha: 1.0,
         evidence_beta: 1.0,
         status: ObservationStatus::Candidate,
@@ -230,6 +232,7 @@ fn test_batch_insert_and_query() {
             content: format!("content {i}"),
             source_type: SourceType::SessionFile,
             source_ref: "test".to_string(),
+            extraction_version: None,
             created_at: chrono::Utc::now().to_rfc3339(),
         })
         .collect();
@@ -255,6 +258,7 @@ fn test_batch_insert_and_query() {
             memory_type_candidate: None,
             observation_detail_json: None,
             extraction_batch_id: None,
+            superseded_by: None,
             evidence_alpha: 1.0,
             evidence_beta: 1.0,
             status: ObservationStatus::Candidate,
@@ -324,6 +328,7 @@ fn test_multiple_stores_share_connection() {
         memory_type_candidate: None,
         observation_detail_json: None,
         extraction_batch_id: None,
+        superseded_by: None,
         evidence_alpha: 1.0,
         evidence_beta: 1.0,
         status: ObservationStatus::Candidate,
@@ -355,6 +360,7 @@ fn test_coclaim_links_same_batch_observations() {
             content: format!("content {i}"),
             source_type: SourceType::SessionFile,
             source_ref: "t".to_string(),
+            extraction_version: None,
             created_at: chrono::Utc::now().to_rfc3339(),
         })
         .collect();
@@ -384,6 +390,7 @@ fn test_coclaim_links_same_batch_observations() {
         memory_type_candidate: None,
         observation_detail_json: None,
         extraction_batch_id: batch.map(|b| b.to_string()),
+        superseded_by: None,
         consolidated: false,
         created_at: chrono::Utc::now().to_rfc3339(),
     };
@@ -408,4 +415,146 @@ fn test_coclaim_links_same_batch_observations() {
     // An observation whose batch has no partners returns empty.
     let lone = obs_store.find_coclaim("obs_3").unwrap();
     assert!(lone.is_empty());
+}
+
+/// P2-D: reextract supersedes a session's old observations and stamps the new prompt
+/// version, leaving the old rows traceable via `superseded_by`.
+#[tokio::test]
+async fn test_reextract_supersedes_old_observations() {
+    use memory_runtime::pipeline::extract::{reextract, EXTRACTION_PROMPT_VERSION};
+    use memory_test_fixtures::mock_llm::MockLlmProvider;
+
+    let db = Database::open_in_memory().unwrap();
+    let raw_store = SqliteRawMemoryStore::new(db.conn.clone());
+    let obs_store = SqliteObservationStore::new(db.conn.clone());
+
+    // One grounded raw memory in session s1.
+    let raw = make_test_raw_memory("ws", "s1", "user", "POSMASK 表没有机器字段");
+    raw_store.insert(&raw).unwrap();
+
+    // --- v1 extraction (old prompt): WRONGLY extracts "has_field" from a negation. ---
+    let v1 = MockLlmProvider::new().with_response(
+        "POSMASK",
+        r#"{"observations":[{"subject_text":"POSMASK","predicate":"has_field","object_text":"机器字段","evidence_text":"POSMASK 表没有机器字段","source_type":"user_message"}]}"#,
+    );
+    let first = extract_observations(&[raw.clone()], &v1).await.unwrap();
+    assert_eq!(first.len(), 1);
+    obs_store.insert_batch(&first).unwrap();
+    // Simulate a prior extraction with an older prompt version.
+    raw_store
+        .set_session_extraction_version("s1", "2026-01-01.v0")
+        .unwrap();
+    let old_id = first[0].observation_id.clone();
+    assert_eq!(
+        raw_store
+            .session_extraction_version("s1")
+            .unwrap()
+            .as_deref(),
+        Some("2026-01-01.v0")
+    );
+
+    // --- v2 re-extraction (new prompt): correctly extracts "not_has_field". ---
+    let v2 = MockLlmProvider::new().with_response(
+        "POSMASK",
+        r#"{"observations":[{"subject_text":"POSMASK","predicate":"not_has_field","object_text":"机器字段","evidence_text":"POSMASK 表没有机器字段","source_type":"user_message"}]}"#,
+    );
+    let outcome = reextract("s1", &v2, &raw_store, &obs_store).await.unwrap();
+    assert_eq!(
+        outcome.superseded, 1,
+        "the single old observation must be superseded"
+    );
+    assert_eq!(outcome.new_observations.len(), 1);
+    let new_batch = outcome.new_observations[0]
+        .extraction_batch_id
+        .clone()
+        .expect("new observation has a batch id");
+
+    // Old row is retained but Superseded, pointing at the replacement batch.
+    let old = obs_store.get(&old_id).unwrap().unwrap();
+    assert_eq!(old.status, ObservationStatus::Superseded);
+    assert_eq!(old.superseded_by.as_deref(), Some(new_batch.as_str()));
+
+    // The new observation is the only live (Candidate) one; superseded is filtered out.
+    let active = obs_store
+        .list_by_workspace("ws", Some(ObservationStatus::Candidate))
+        .unwrap();
+    assert_eq!(active.len(), 1);
+    assert_eq!(active[0].predicate, "not_has_field");
+    let superseded = obs_store
+        .list_by_workspace("ws", Some(ObservationStatus::Superseded))
+        .unwrap();
+    assert_eq!(superseded.len(), 1);
+
+    // Session is now stamped with the current prompt version.
+    assert_eq!(
+        raw_store
+            .session_extraction_version("s1")
+            .unwrap()
+            .as_deref(),
+        Some(EXTRACTION_PROMPT_VERSION)
+    );
+}
+
+/// F2: find_coclaim excludes siblings in dead statuses (superseded/rejected/deprecated)
+/// so clustering never pulls rows whose coclaim edges linger after re-extraction.
+#[test]
+fn test_find_coclaim_excludes_dead_statuses() {
+    let db = Database::open_in_memory().unwrap();
+
+    let raws: Vec<RawMemory> = (0..2)
+        .map(|i| RawMemory {
+            memory_id: format!("mem_{i}"),
+            workspace_id: "ws".to_string(),
+            session_id: "s1".to_string(),
+            role: "user".to_string(),
+            content: format!("content {i}"),
+            source_type: SourceType::SessionFile,
+            source_ref: "t".to_string(),
+            extraction_version: None,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        })
+        .collect();
+    {
+        let conn = db.conn.lock();
+        seed_raw_memories(&conn, &raws);
+    }
+    let obs_store = SqliteObservationStore::new(db.conn.clone());
+
+    // Two co-claimed observations in one batch.
+    let mk = |i: usize| Observation {
+        observation_id: format!("obs_{i}"),
+        workspace_id: "ws".to_string(),
+        memory_id: format!("mem_{i}"),
+        subject_text: format!("entity_{i}"),
+        subject_type: None,
+        predicate: "has_value".to_string(),
+        object_text: Some(format!("value_{i}")),
+        object_type: None,
+        evidence_text: None,
+        extraction_confidence: 0.7,
+        evidence_alpha: 1.0,
+        evidence_beta: 1.0,
+        status: ObservationStatus::Candidate,
+        surprise_score: 0.5,
+        source_type: ObservationSourceType::UserMessage,
+        memory_type_candidate: None,
+        observation_detail_json: None,
+        extraction_batch_id: Some("batch_x".to_string()),
+        superseded_by: None,
+        consolidated: false,
+        created_at: chrono::Utc::now().to_rfc3339(),
+    };
+    obs_store.insert_batch(&[mk(0), mk(1)]).unwrap();
+
+    // Both candidates -> find_coclaim returns the sibling.
+    assert_eq!(obs_store.find_coclaim("obs_0").unwrap().len(), 1);
+
+    // Supersede obs_1: its coclaim edge remains, but find_coclaim must now exclude it.
+    obs_store
+        .update_status("obs_1", ObservationStatus::Superseded)
+        .unwrap();
+    assert!(
+        obs_store.find_coclaim("obs_0").unwrap().is_empty(),
+        "superseded siblings must be filtered from find_coclaim"
+    );
 }

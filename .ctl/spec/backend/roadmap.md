@@ -184,6 +184,7 @@ gantt
 | 文件 | `store/traits.rs`（新方法），`pipeline/extract.rs`，新 migration |
 | 验收 | 修改提取 prompt 后，可以重新提取已有 session 并替换旧结果 |
 | 依赖 | P2-A, P2-C |
+| 状态 | ✅ 已完成 (`p2d-reverse-correction-2`；原 `p2d-reverse-correction` 因 scope 漏 `ingest.rs`/`status.rs`/tests 启动后无法 revise，已 cancel+archive) — migration 005 加 `raw_memory.extraction_version` + `observation.superseded_by`；新增 `ObservationStatus::Superseded` 变体；`RawMemoryStore::session_extraction_version`/`set_session_extraction_version` + `ObservationStore::mark_session_superseded`（按 session_id 经 raw_memory 关联定位旧 Observation）；`reextract(session_id)` 用 `extract_observations`（非 dedup，避免旧行干扰）→ 先 mark 旧为 superseded 再插新批 → stamp 当前 `EXTRACTION_PROMPT_VERSION`。旧行保留可追溯，recall 按 status 过滤。48 tests pass，含 reextract 集成测试 |
 
 ---
 

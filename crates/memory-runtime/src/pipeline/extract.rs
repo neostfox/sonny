@@ -6,7 +6,7 @@ use crate::llm::traits::LlmProvider;
 use crate::models::observation::{Observation, ObservationSourceType};
 use crate::models::raw_memory::RawMemory;
 use crate::models::status::ObservationStatus;
-use crate::store::traits::ObservationStore;
+use crate::store::traits::{ObservationStore, RawMemoryStore};
 
 /// Prompt version stamped on every extraction. Bump when EXTRACTION_SYSTEM_PROMPT changes;
 /// consumed by P2-D reverse-correction to detect stale extractions needing re-extraction.
@@ -196,6 +196,7 @@ fn raw_to_observation(
         memory_type_candidate: None,
         observation_detail_json: None,
         extraction_batch_id: Some(extraction_batch_id.to_string()),
+        superseded_by: None,
         consolidated: false,
         created_at: chrono::Utc::now().to_rfc3339(),
     }
@@ -230,6 +231,63 @@ pub async fn extract_and_dedup<S: ObservationStore>(
         );
     }
     Ok(kept)
+}
+
+/// P2-D: outcome of [`reextract`] — the fresh batch (already inserted) and how many
+/// stale observations were superseded.
+#[derive(Debug, Clone)]
+pub struct ReextractOutcome {
+    pub new_observations: Vec<Observation>,
+    pub superseded: usize,
+}
+
+/// P2-D: re-extract a session and replace its prior observations.
+///
+/// Loads the session's raw memories, re-runs extraction with the *current* prompt,
+/// then atomically supersedes the session's old observations and inserts the fresh
+/// batch (one transaction — a failure leaves the old rows live). Finally stamps
+/// [`EXTRACTION_PROMPT_VERSION`] onto the session. Old rows are retained; recall
+/// filters them out by status.
+///
+/// Uses [`extract_observations`] (not `extract_and_dedup`) deliberately: the old
+/// observations are still live during extraction, so dedup-against-store would
+/// wrongly drop the replacements.
+pub async fn reextract<R, O>(
+    session_id: &str,
+    llm: &impl LlmProvider,
+    raw_store: &R,
+    obs_store: &O,
+) -> MemoryResult<ReextractOutcome>
+where
+    R: RawMemoryStore,
+    O: ObservationStore,
+{
+    let raw_memories = raw_store.get_by_session(session_id)?;
+    if raw_memories.is_empty() {
+        return Ok(ReextractOutcome {
+            new_observations: vec![],
+            superseded: 0,
+        });
+    }
+
+    // Re-extract with the current prompt; this mints a shared extraction_batch_id.
+    let new_observations = extract_observations(&raw_memories, llm).await?;
+
+    // Atomic supersede-and-replace: old rows flip to Superseded and the new batch is
+    // inserted in one transaction, so a mid-step failure can't orphan the session.
+    let superseded = obs_store.replace_session_observations(session_id, &new_observations)?;
+
+    raw_store.set_session_extraction_version(session_id, EXTRACTION_PROMPT_VERSION)?;
+
+    tracing::info!(
+        "reextract(session={session_id}): superseded {superseded} observation(s), extracted {} new (prompt {EXTRACTION_PROMPT_VERSION})",
+        new_observations.len()
+    );
+
+    Ok(ReextractOutcome {
+        new_observations,
+        superseded,
+    })
 }
 
 fn parse_source_type(s: &str) -> ObservationSourceType {
@@ -281,6 +339,7 @@ mod tests {
             content: "Hello".into(),
             source_type: crate::models::raw_memory::SourceType::SessionFile,
             source_ref: "test.json".into(),
+            extraction_version: None,
             created_at: "2026-01-01".into(),
         }];
         let result = format_messages(&memories);
@@ -325,6 +384,7 @@ mod tests {
             content: "POSMASK 表没有机器字段".into(),
             source_type: crate::models::raw_memory::SourceType::SessionFile,
             source_ref: "t.json".into(),
+            extraction_version: None,
             created_at: "2026-01-01".into(),
         };
         let observations = extract_observations(&[raw], &mock).await.unwrap();

@@ -28,8 +28,10 @@ pub struct Observation {
     pub observation_detail_json: Option<String>,
     /// P2-C: groups observations produced by a single `extract_observations()` call.
     /// Enables coclaim co-occurrence queries for clustering (design §5.3). `None` for
-    /// observations inserted individually or migrated from pre-P2-C databases.
     pub extraction_batch_id: Option<String>,
+    /// P2-D: when this observation was superseded by a re-extraction, points to the
+    /// replacement's `extraction_batch_id`. Paired with `status = Superseded`.
+    pub superseded_by: Option<String>,
     pub created_at: String,
 }
 
@@ -168,6 +170,7 @@ mod tests {
             memory_type_candidate: None,
             observation_detail_json: None,
             extraction_batch_id: None,
+            superseded_by: None,
             created_at: "t".into(),
         }
     }

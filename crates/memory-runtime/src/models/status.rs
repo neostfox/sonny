@@ -11,6 +11,8 @@ pub enum ObservationStatus {
     Deprecated,
     Disputed,
     Orphan,
+    /// P2-D: replaced by a newer extraction from reextract(); kept for traceability.
+    Superseded,
 }
 
 impl ObservationStatus {
@@ -24,6 +26,7 @@ impl ObservationStatus {
             Self::Deprecated => "deprecated",
             Self::Disputed => "disputed",
             Self::Orphan => "orphan",
+            Self::Superseded => "superseded",
         }
     }
 }
@@ -40,6 +43,7 @@ impl std::str::FromStr for ObservationStatus {
             "deprecated" => Ok(Self::Deprecated),
             "disputed" => Ok(Self::Disputed),
             "orphan" => Ok(Self::Orphan),
+            "superseded" => Ok(Self::Superseded),
             _ => Err(()),
         }
     }

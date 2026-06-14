@@ -9,6 +9,9 @@ pub struct RawMemory {
     pub content: String,
     pub source_type: SourceType,
     pub source_ref: String,
+    /// P2-D: prompt version used by the last extraction over this memory's session.
+    /// `None` until `reextract`/extract stamps it; enables detecting stale extractions.
+    pub extraction_version: Option<String>,
     pub created_at: String,
 }
 

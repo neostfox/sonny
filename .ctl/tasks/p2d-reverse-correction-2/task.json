@@ -3,17 +3,18 @@
     "cargo_check",
     "cargo_test"
   ],
-  "id": "p2d-reverse-correction",
+  "id": "p2d-reverse-correction-2",
   "is_archived": true,
   "is_held": false,
-  "last_event_seq": 6,
-  "objective": "反向修正机制：raw_memory 加 extraction_version，reextract 重新提取并标记旧 Observation 为 superseded",
-  "phase": "cancelled",
+  "last_event_seq": 8,
+  "objective": "反向修正机制：raw_memory 加 extraction_version，reextract 重新提取并标记旧 Observation 为 superseded（接续已取消的 p2d-reverse-correction，补全 scope：ingest.rs/status.rs/tests）",
+  "phase": "completed",
   "read_scope": [
     "crates/memory-runtime/src/models/observation.rs",
     "crates/memory-runtime/src/models/raw_memory.rs",
     "crates/memory-runtime/src/models/status.rs",
     "crates/memory-runtime/src/pipeline/extract.rs",
+    "crates/memory-runtime/src/pipeline/ingest.rs",
     "crates/memory-runtime/src/store",
     "crates/memory-runtime/tests/integration_test.rs"
   ],
@@ -24,6 +25,7 @@
     "crates/memory-runtime/src/models/raw_memory.rs",
     "crates/memory-runtime/src/models/status.rs",
     "crates/memory-runtime/src/pipeline/extract.rs",
+    "crates/memory-runtime/src/pipeline/ingest.rs",
     "crates/memory-runtime/src/store",
     "crates/memory-runtime/tests/integration_test.rs"
   ],

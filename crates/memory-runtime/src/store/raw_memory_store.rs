@@ -18,7 +18,7 @@ impl SqliteRawMemoryStore {
     }
 }
 
-const RAW_INSERT_SQL: &str = "INSERT OR IGNORE INTO raw_memory (memory_id, workspace_id, session_id, role, content, source_type, source_ref, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)";
+const RAW_INSERT_SQL: &str = "INSERT OR IGNORE INTO raw_memory (memory_id, workspace_id, session_id, role, content, source_type, source_ref, extraction_version, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)";
 
 impl RawMemoryStore for SqliteRawMemoryStore {
     fn insert(&self, raw: &RawMemory) -> MemoryResult<()> {
@@ -33,6 +33,7 @@ impl RawMemoryStore for SqliteRawMemoryStore {
                 &raw.content,
                 raw.source_type.as_str(),
                 &raw.source_ref,
+                &raw.extraction_version,
                 &raw.created_at,
             ),
         )?;
@@ -53,6 +54,7 @@ impl RawMemoryStore for SqliteRawMemoryStore {
                     &raw.content,
                     raw.source_type.as_str(),
                     &raw.source_ref,
+                    &raw.extraction_version,
                     &raw.created_at,
                 ),
             )?;
@@ -63,7 +65,7 @@ impl RawMemoryStore for SqliteRawMemoryStore {
     fn get_by_session(&self, session_id: &str) -> MemoryResult<Vec<RawMemory>> {
         let conn = self.conn.lock();
         let mut stmt = conn.prepare(
-            "SELECT memory_id, workspace_id, session_id, role, content, source_type, source_ref, created_at
+            "SELECT memory_id, workspace_id, session_id, role, content, source_type, source_ref, extraction_version, created_at
              FROM raw_memory WHERE session_id = ?1 ORDER BY created_at"
         )?;
         let rows = stmt.query_map([session_id], |row| {
@@ -75,7 +77,8 @@ impl RawMemoryStore for SqliteRawMemoryStore {
                 content: row.get(4)?,
                 source_type: parse_source_type(&row.get::<_, String>(5)?),
                 source_ref: row.get(6)?,
-                created_at: row.get(7)?,
+                extraction_version: row.get(7)?,
+                created_at: row.get(8)?,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
@@ -84,7 +87,7 @@ impl RawMemoryStore for SqliteRawMemoryStore {
     fn list_by_workspace(&self, workspace_id: &str, limit: usize) -> MemoryResult<Vec<RawMemory>> {
         let conn = self.conn.lock();
         let mut stmt = conn.prepare(
-            "SELECT memory_id, workspace_id, session_id, role, content, source_type, source_ref, created_at
+            "SELECT memory_id, workspace_id, session_id, role, content, source_type, source_ref, extraction_version, created_at
              FROM raw_memory WHERE workspace_id = ?1 ORDER BY created_at DESC LIMIT ?2"
         )?;
         let rows = stmt.query_map((workspace_id, limit as i64), |row| {
@@ -96,10 +99,38 @@ impl RawMemoryStore for SqliteRawMemoryStore {
                 content: row.get(4)?,
                 source_type: parse_source_type(&row.get::<_, String>(5)?),
                 source_ref: row.get(6)?,
-                created_at: row.get(7)?,
+                extraction_version: row.get(7)?,
+                created_at: row.get(8)?,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// P2-D: prompt version stamped on a session's memories by the last extraction.
+    /// Returns `None` if the session has not been extracted, or the version if all
+    /// rows agree (a session is extracted atomically, so they should).
+    fn session_extraction_version(&self, session_id: &str) -> MemoryResult<Option<String>> {
+        let conn = self.conn.lock();
+        let version: Option<String> = conn
+            .query_row(
+                "SELECT extraction_version FROM raw_memory
+             WHERE session_id = ?1 AND extraction_version IS NOT NULL
+             GROUP BY extraction_version ORDER BY COUNT(*) DESC LIMIT 1",
+                [session_id],
+                |r| r.get(0),
+            )
+            .ok();
+        Ok(version)
+    }
+
+    /// P2-D: stamp the prompt version onto every memory in a session after extraction.
+    fn set_session_extraction_version(&self, session_id: &str, version: &str) -> MemoryResult<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE raw_memory SET extraction_version = ?1 WHERE session_id = ?2",
+            [version, session_id],
+        )?;
+        Ok(())
     }
 }
 
@@ -131,6 +162,7 @@ mod tests {
             content: format!("content {id}"),
             source_type: SourceType::SessionFile,
             source_ref: "test.json".into(),
+            extraction_version: None,
             created_at: format!("2026-06-13T00:00:{secs:02}Z"),
         }
     }

@@ -1,0 +1,23 @@
+{
+  "gates": [
+    "cargo_check",
+    "cargo_test"
+  ],
+  "id": "p2d-review-fixes",
+  "is_archived": true,
+  "is_held": false,
+  "last_event_seq": 8,
+  "objective": "P2-D review fixes: atomic replace_session_observations (F1), find_coclaim status filter (F2), NULL superseded_by on empty batch (F3)",
+  "phase": "completed",
+  "read_scope": [
+    "crates/memory-runtime/src/pipeline/extract.rs",
+    "crates/memory-runtime/src/store"
+  ],
+  "risk_triggers": [],
+  "schema": "control.task-view.v1",
+  "write_allow": [
+    "crates/memory-runtime/src/pipeline/extract.rs",
+    "crates/memory-runtime/src/store"
+  ],
+  "write_deny": []
+}

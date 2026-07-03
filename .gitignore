@@ -47,3 +47,6 @@ Cargo.lock
 
 # Control plane: OMP run worktrees (git worktrees, not source)
 .ctl/tasks/*/worktree/
+
+# Claude Code local (per-user) settings
+.claude/settings.local.json

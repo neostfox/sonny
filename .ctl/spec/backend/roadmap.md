@@ -247,7 +247,7 @@ gantt
 
 ## P4: 闭环（Recall + Feedback）
 
-### P4-A: Recall 引擎
+### P4-A: Recall 引擎 ✅
 
 | 项 | 值 |
 |---|---|
@@ -256,6 +256,7 @@ gantt
 | 文件 | `recall/mod.rs`（从 stub 变为真实实现） |
 | 验收 | 输入 query 输出 ≤1500 tokens 的 MemoryContext；不同 Intent 产生不同侧重 |
 | 依赖 | P3-A（embedding）, P3-B（聚类，提供候选概念） |
+| 状态 | ✅ 已实现（uncommitted）— Intent 双语分类 + 实体匹配 + embedding 语义搜索 + 动态 token 预算 + recall stats 更新。7 tests in recall/mod.rs |
 
 ### P4-B: Feedback 系统
 

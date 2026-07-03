@@ -16,47 +16,45 @@ Spec documents for the Memory Runtime system — a concept-growth-based long-ter
 - [Roadmap](../backend/roadmap.md) — MVP phases, post-MVP enhancements, scale features (GNN, meta-learning), evaluation framework
 - [Design Reference](../backend/design-reference.md) — Backend design status and cross-cutting reference
 
+## Implementation Status (as of 2026-06-22)
+
+| Phase | Status | Notes |
+|-------|--------|-------|
+| P0 (Foundation) | ✅ Complete | Windows compat, connection ownership, entity_concept, type-safe store, heap alloc |
+| P1 (Model Alignment) | ✅ Complete | MemoryItem removal, candidate status, confidence dual-dimension, model alignment |
+| P2-A (Extraction Validation) | ✅ Complete | Anti-hallucination gate, evidence support check |
+| P2-B (Dedup/Normalize) | ✅ Complete | Predicate normalization, duplicate detection |
+| P2-C (Observation Co-occurrence) | ✅ Complete | extraction_batch_id, observation_coclaim table |
+| P2-D (Reverse Correction) | ✅ Complete | reextract(), prompt versioning, supersede mechanism |
+| P3-A (Embedding Storage) | ✅ Complete | BLOB storage, cosine search, OpenAI-compatible provider |
+| P3-B (Cluster Engine) | ✅ Complete | HAC clustering, combined distance, entity+embedding |
+| P3-C (Merge/Split) | ✅ Complete | Candidate merging, Jaccard similarity, Union-Find |
+| P4-A (Recall Engine) | ✅ Complete | Intent classification, entity match, semantic search, token budget, recall stats |
+| P4-B (Feedback) | ⏳ Planned | Model exists, no table/implementation |
+| P4-C (Time Awareness) | ⏳ Planned | Not started |
+
 ## Quick Reference
 
 | Topic | File | Key Section |
 |-------|------|-------------|
 | Why no NER | principles.md | Design Decisions |
 | Neuroscience mechanisms | principles.md | Neuroscience-Inspired Mechanisms |
-| Active Learning decision | principles.md | Active Learning for Human-in-the-Loop |
-| Adversarial Validation decision | principles.md | Adversarial Validation for Extraction Quality |
-| GNN auto-activation decision | principles.md | GNN Auto-Activation at Scale |
 | Predictive coding extraction | concept-growth.md | Stage 2: Extract |
-| Adversarial validation gate | concept-growth.md | Stage 3: Validate |
-| Incremental embedding update | concept-growth.md | Stage 4: Embed |
 | Clustering algorithm | concept-growth.md | Stage 5: Cluster |
-| Hippocampal buffer (complementary learning) | concept-growth.md | Stage 8: Consolidate |
-| Hierarchy detection (chunking) | concept-growth.md | Stage 8: Consolidate |
 | DB schema | memory-model.md | All object tables |
-| Hippocampal buffer table | memory-model.md | Hippocampal Buffer |
-| Concept hierarchy table | memory-model.md | Concept Hierarchy |
 | Vector storage | memory-model.md | Embedding Tables |
 | Dual-dimension confidence | memory-model.md | Observation |
 | Memory type taxonomy | memory-model.md | Memory Types |
-| Contextual priming | recall-design.md | Contextual Priming |
-| Sparse activation | recall-design.md | Sparse Activation |
-| Hierarchy expansion | recall-design.md | Hierarchy Expansion |
 | Recall flow | recall-design.md | Recall Execution Flow |
-| Reconsolidation | quality-control.md | Memory Reconsolidation |
-| Active Learning questions | quality-control.md | Active Learning |
-| Adversarial Validation criteria | quality-control.md | Adversarial Validation |
+| Intent classification | recall-design.md | Intent Classification |
 | Confidence weights | quality-control.md | Evidence Weight Table |
-| Auto-confirmation | quality-control.md | Auto-Confirmation Algorithm |
-| MVP phases | ../backend/roadmap.md | MVP (Phase 1-4) |
-| Post-MVP enhancements | ../backend/roadmap.md | Post-MVP Enhancements |
-| GNN scale feature | ../backend/roadmap.md | Scale Feature 1: GNN |
-| Meta-learning scale feature | ../backend/roadmap.md | Scale Feature 2: Meta-Learning |
-| Evaluation criteria | ../backend/roadmap.md | Evaluation Framework |
 
 ## Tech Stack
 
 - **Language**: Rust (core engine) + TypeScript (Claude Code hooks)
-- **Embedding**: `BAAI/bge-small-zh-v1.5` via `candle-transformers` (512-dim, ~90MB, Chinese-optimized)
+- **Embedding**: OpenAI-compatible `/v1/embeddings` endpoint (bge-m3 1024-dim default)
 - **Clustering**: `linfa-clustering` (HAC)
-- **Storage**: `rusqlite` (SQLite + optional sqlite-vec)
-- **CLI**: `clap`
-- **Async**: `tokio`
+- **Storage**: `rusqlite` (SQLite with WAL mode)
+- **Async**: `tokio` + `reqwest`
+- **CLI**: `clap` (derive)
+- **Concurrency**: `parking_lot::Mutex`

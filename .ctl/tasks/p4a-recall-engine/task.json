@@ -6,9 +6,9 @@
   "id": "p4a-recall-engine",
   "is_archived": false,
   "is_held": false,
-  "last_event_seq": 1,
+  "last_event_seq": 7,
   "objective": "Recall 引擎：Intent 分类+实体匹配+embedding 语义搜索，MemoryContext token_count 生效，动态 token 预算",
-  "phase": "planning",
+  "phase": "review",
   "read_scope": [
     "crates/memory-runtime/src/embed",
     "crates/memory-runtime/src/models/recall.rs",

@@ -10,6 +10,8 @@ pub struct MemoryContext {
     pub rejected_hypotheses: Vec<String>,
     pub task_state: Vec<String>,
     pub relevant_entities: Vec<String>,
+    /// Estimated token count for [`MemoryContext::to_prompt`]. Recall builders must keep
+    /// this at or below the requested budget.
     pub token_count: usize,
 }
 
@@ -71,6 +73,8 @@ impl MemoryContext {
 pub struct RecallScore {
     pub concept_id: String,
     pub score: f64,
+    pub semantic_score: f64,
+    pub entity_score: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -95,4 +99,42 @@ impl Intent {
             Self::GeneralQuery => "general_query",
         }
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RecallBudget {
+    pub max_tokens: usize,
+    pub user_preferences: usize,
+    pub known_facts: usize,
+    pub rejected_hypotheses: usize,
+    pub task_state: usize,
+    pub relevant_entities: usize,
+}
+
+impl RecallBudget {
+    pub fn for_intent(intent: &Intent, max_tokens: usize) -> Self {
+        let available = max_tokens.saturating_sub(250).max(max_tokens / 2);
+        let (user_preferences, known_facts, rejected_hypotheses, task_state, relevant_entities) =
+            match intent {
+                Intent::ContinueInvestigation => (10, 30, 10, 35, 15),
+                Intent::VerifyFact => (10, 45, 20, 10, 15),
+                Intent::CorrectMistake => (10, 30, 35, 10, 15),
+                Intent::AddKnowledge => (15, 30, 10, 25, 20),
+                Intent::ReviewHistory => (15, 40, 15, 15, 15),
+                Intent::GeneralQuery => (15, 40, 15, 15, 15),
+            };
+
+        Self {
+            max_tokens,
+            user_preferences: pct(available, user_preferences),
+            known_facts: pct(available, known_facts),
+            rejected_hypotheses: pct(available, rejected_hypotheses),
+            task_state: pct(available, task_state),
+            relevant_entities: pct(available, relevant_entities),
+        }
+    }
+}
+
+const fn pct(total: usize, percent: usize) -> usize {
+    total.saturating_mul(percent) / 100
 }

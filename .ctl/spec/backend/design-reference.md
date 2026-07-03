@@ -10,7 +10,7 @@
 | 每条记忆必须有证据来源 | ✅ | `evidence_text` 字段在 Observation 上，extraction prompt 要求 |
 | 助手推测默认不是事实 | ✅ | `ObservationSourceType::AssistantGuess` 区分来源 |
 | 否定信息是高价值记忆 | ✅ | `ObservationSourceType::UserNegation` + `FeedbackType::Negate` |
-| Memory Context 必须短、准、可操作 | ⚠️ | `MemoryContext.to_prompt()` 存在，但 `token_count` 字段不生效 |
+| Memory Context 必须短、准、可操作 | ✅ | `MemoryContext.to_prompt()` + `token_count` enforced by `build_context()` + `enforce_total_budget()` |
 
 ## §3 系统流程
 
@@ -23,8 +23,8 @@ Observation Extract ✅ pipeline/extract.rs
 Session Distiller   ❌ 未实现
 Concept Growth      ❌ 未实现
 Memory Store        ✅ store/
-Memory Retriever    ❌ recall/ stub
-Memory Context      ⚠️ models/recall.rs (仅格式化)
+Memory Retriever    ✅ recall/mod.rs (P4-A: Intent + Entity + Semantic)
+Memory Context      ✅ models/recall.rs + recall/mod.rs (token_count enforced)
 User Feedback       ❌ feedback/ stub
 Memory Revision     ❌ 未实现
 ```
@@ -34,9 +34,9 @@ Memory Revision     ❌ 未实现
 ```
 设计要求:                    实现状态:
 识别 workspace/repo/task      ❌ CLI 用 --workspace flag
-召回相关概念                  ❌ recall/ stub
-展开概念下的事实、约束、偏好    ❌ 无展开逻辑
-生成 Memory Context           ⚠️ to_prompt() 存在
+召回相关概念                  ✅ recall/mod.rs: rank() combines semantic + entity
+展开概念下的事实、约束、偏好    ✅ recall/mod.rs: build_context() populates sections
+生成 Memory Context           ✅ recall/mod.rs: token_count enforced
 注入 Coding Agent             ❌ 无 prehook 实现
 ```
 
@@ -139,7 +139,7 @@ Concept Promotion / Review  ❌ 未实现
 | Link | 连接实体、事实、假设、偏好 | 不存在 | ❌ |
 | Validate | 证据升权/降权 | `confidence/mod.rs` + `extract_and_dedup()` | ✅ P3-D（跨 session 留 consolidation） |
 | Promote | Candidate → Concept 升级 | 不存在 | ❌ |
-| Use | 基于概念召回上下文 | `recall/` stub | ❌ **D8** |
+| Use | 基于概念召回上下文 | `recall/mod.rs` | ✅ P4-A（Intent + Entity + Semantic + Token Budget） |
 | Revise | 反馈修正概念边界 | `feedback/` stub | ❌ **D9** |
 
 ## §6 记忆类型定义
@@ -158,8 +158,8 @@ memory-runtime 详细设计已迁移至 [../memory-runtime/](../memory-runtime/i
 | 不允许没有 evidence 就写入长期记忆 | ✅ extraction prompt 强制要求 evidence_text |
 | 不允许把助手推测直接设为 confirmed | ✅ AssistantGuess 只能进 Candidate |
 | 不允许丢弃用户否定信息 | ✅ UserNegation source_type 存在 |
-| 不允许绕过 Concept 直接做纯文本召回 | ⚠️ recall 未实现，无法验证 |
-| 不允许生成过长 Memory Context | ⚠️ token_count 不生效 |
+| 不允许绕过 Concept 直接做纯文本召回 | ✅ recall/mod.rs 通过 ConceptStore 检索 |
+| 不允许生成过长 Memory Context | ✅ enforce_total_budget() + truncate_section() |
 
 ## §9 MVP 范围
 
@@ -170,7 +170,7 @@ memory-runtime 详细设计已迁移至 [../memory-runtime/](../memory-runtime/i
 | 能生成候选概念 | ❌ |
 | 能展示概念详情 | ❌ |
 | 能保留被否定假设 | ⚠️ 模型支持，无 pipeline 产出 |
-| 能基于用户问题召回 Memory Context | ❌ |
+| 能基于用户问题召回 Memory Context | ✅ recall/mod.rs: Intent + Entity + Semantic + Token Budget |
 | 能区分用户确认和助手推测 | ✅ |
 | 能根据用户反馈调整记忆状态 | ❌ |
 
@@ -182,6 +182,6 @@ CLI（§11）只实现了 3 个命令（init, ingest-session, list-observations�
 
 LLM 抽取规范（§12）: Observation Extractor ✅, Session Distiller ❌, Concept Candidate Builder ❌。
 
-Recall 设计（§13）: 完全未实现。
+Recall 设计（§13）: ✅ P4-A 实现：Intent 双语分类 + 实体匹配 + embedding 语义搜索 + 动态 token 预算 + recall stats 更新。
 
-验收标准（§14）: 8 条基础验收中满足 4 条。
+验收标准（§14）: 8 条基础验收中满足 5 条（+1 Recall 召回上下文）。

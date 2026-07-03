@@ -13,11 +13,11 @@ The `Mutex::lock().unwrap()` pattern is the one exception — it only panics on 
 
 ### `todo!()` or `unimplemented()` in non-stub code
 
-Stubs (`recall/mod.rs`, `feedback/mod.rs`) may have placeholder comments. Active modules must not contain `todo!()` macros.
+Only `feedback/mod.rs` has a placeholder comment. Active modules must not contain `todo!()` macros.
 
 ### `panic!()` for recoverable errors
 
-All recoverable error conditions must return `MemoryError`. Only truly impossible states may panic (e.g., regex `unwrap()` on compile-time constants).
+All recoverable error conditions must return `MemoryError`. Only truly impossible states may panic (e.g., regex `unwrap()` on compile-time constants, LazyLock initialization).
 
 ### Domain types importing infrastructure
 
@@ -26,6 +26,17 @@ All recoverable error conditions must return `MemoryError`. Only truly impossibl
 ### `Box<dyn Error>` instead of `MemoryError`
 
 Never return `Box<dyn std::error::Error>`. Always use `MemoryResult<T>`.
+
+### Manual regex compilation
+
+Use `std::sync::LazyLock` for compiled regexes:
+
+```rust
+// ✅ Correct — from pipeline/ingest.rs
+use std::sync::LazyLock;
+static SESSION_ID_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)^session\s+(\d+)").unwrap());
+```
 
 ## Required Patterns
 
@@ -40,6 +51,17 @@ pub struct Observation { ... }
 
 ```rust
 pub trait ObservationStore: Send + Sync { ... }
+pub trait EmbeddingProvider: Send + Sync { ... }
+pub trait LlmProvider: Send + Sync { ... }
+```
+
+### `async_trait` for async trait methods
+
+```rust
+#[async_trait]
+pub trait LlmProvider: Send + Sync {
+    async fn complete(&self, prompt: &str, system: Option<&str>) -> MemoryResult<String>;
+}
 ```
 
 ### Column constants for SQL queries
@@ -62,37 +84,36 @@ Always enabled. Every open must set these pragmas.
 "INSERT OR IGNORE INTO raw_memory ..."
 ```
 
-## Known Issues (from Code Review)
+### `params![]` macro for SQL parameters
 
-### 🔴 Critical
+```rust
+conn.execute(
+    "INSERT INTO observation (...) VALUES (?1, ?2, ...)",
+    params![obs.observation_id, obs.workspace_id, ...],
+)?;
+```
 
-| ID | Issue | File | Impact |
-|----|-------|------|--------|
-| C1 | 连接所有权：每个 store move Connection，多 store 无法共享 | `connection.rs`, CLI `main.rs` | extract pipeline 无法同时使用两个 store |
-| C2 | `find_by_entities` 用 `LIKE '%?%'` 搜索 JSON | `concept_store.rs:191` | 假阳性：搜索 "user" 匹配 "user_profile" |
-| C3 | `dirs_home()` 用 `$HOME`，Windows 上不存在 | `config.rs:148` | Windows 上默认路径 `/tmp` |
+## Known Issues
 
 ### 🟠 High
 
 | ID | Issue | File | Impact |
 |----|-------|------|--------|
-| H1 | `update_status` 接受裸 `&str` 不是枚举 | `store/traits.rs:18` | 拼写错误静默写入无效状态 |
-| H2 | `obs_params` / `candidate_params` 每次 17-23 个 `Box<dyn ToSql>` 堆分配 | `observation_store.rs:26`, `concept_store.rs:34` | 批量插入时大量分配 |
-| H3 | 所有 `parse_*` 状态函数静默默认值，无日志 | `observation_store.rs:192`, `concept_store.rs:306,317,329` | DB 损坏状态被隐藏 |
-| H4 | `extract_session_id` 每次调用编译 Regex | `ingest.rs:188` | 不必要的性能开销 |
-| H5 | `update_recall_stats` 不检查受影响行数 | `concept_store.rs:209` | 不存在的 concept_id 静默成功 |
+| H1 | `list_by_workspace` for observations has no LIMIT | `observation_store.rs` | Large workspace may be slow |
+| H2 | `obs_params` / `candidate_params` heap-allocate 17-23 `Box<dyn ToSql>` per row | `observation_store.rs`, `concept_store.rs` | Batch insert overhead |
+| H3 | `parse_observation_status` etc. silently default on invalid DB values | `observation_store.rs`, `concept_store.rs` | Corrupted state hidden |
+| H4 | `update_recall_stats` doesn't check affected row count | `concept_store.rs` | Non-existent concept_id silently succeeds |
+| H5 | `find_by_entities` uses `LIKE '%?%'` on JSON columns | `concept_store.rs` | False positives: "user" matches "user_profile" |
 
 ### 🟡 Medium
 
 | ID | Issue | File | Impact |
 |----|-------|------|--------|
-| M1 | `list_by_workspace` 无 LIMIT | `observation_store.rs:91` | 大 workspace OOM |
-| M2 | `MemoryContext.token_count` 不生效 | `models/recall.rs:13` | 无截断，超 LLM token 限制 |
-| M3 | `insert_batch` 用 `unchecked_transaction()` | `observation_store.rs:60` | 不验证 autocommit 状态 |
-| M4 | `ConceptCandidate.status` 是 `ObservationStatus` | `models/concept.rs:22` | 无意义状态变体 |
-| M5 | `MemoryItem` 表和模型存在但无任何代码 | `models/memory_item.rs` | 死代码 |
-| M6 | `repair_json` 只处理 markdown fence | `extract.rs:139` | LLM 其他畸形输出未处理 |
-| M7 | `open_in_memory()` 设置 WAL PRAGMA | `connection.rs:22` | 无害但误导 |
+| M1 | `MemoryItem` table dropped in migration 003, but initial migration still creates it | `001_initial.sql` | Dead DDL in fresh DB |
+| M2 | `repair_json` only handles markdown fence ```json | `extract.rs` | Other malformed LLM output not handled |
+| M3 | `open_in_memory()` sets WAL PRAGMA | `connection.rs` | Harmless but misleading |
+| M4 | `dirs_home()` uses `$HOME` which may not exist on Windows | `config.rs` | Falls back to temp dir |
+| M5 | `ConceptCandidate` status enum is `CandidateStatus` which includes `Merged`/`Split` — valid but no pipeline triggers these | `models/status.rs` | States exist but no code path uses them |
 
 ## Naming Conventions
 
@@ -103,18 +124,20 @@ Always enabled. Every open must set these pragmas.
 | Struct / Enum | PascalCase | `Observation`, `ObservationStatus` |
 | Enum variant | PascalCase | `FastStored`, `AutoConfirmed` |
 | Function / method | snake_case | `extract_observations`, `canonical_key` |
-| Constant | SCREAMING_SNAKE | `EMBEDDING_DIM`, `OBS_COLUMNS` |
+| Constant | SCREAMING_SNAKE | `EMBEDDING_DIM`, `EXTRACTION_PROMPT_VERSION` |
 | Type alias | PascalCase | `MemoryResult<T>` |
 | SQL table | snake_case | `raw_memory`, `concept_candidate` |
 | SQL column | snake_case | `observation_id`, `workspace_id` |
+| Test function | snake_case with `test_` prefix | `test_extract_with_mock_llm` |
 
 ## Build Commands
 
 | Command | Purpose |
 |---------|---------|
 | `cargo check` | Fast type-check without codegen |
-| `cargo test` | Run all tests (unit + integration) |
-| `cargo test -p memory-runtime` | Test single crate |
+| `cargo test` | Run all tests (72 total) |
+| `cargo test` | Run all tests (72+ total) |
+| `cargo test -p memory-test-fixtures` | Test fixtures crate |
 | `cargo clippy -- -D warnings` | Lint with zero warnings |
 | `cargo build` | Full build |
 | `cargo run -p sonny-cli -- --help` | Run CLI |

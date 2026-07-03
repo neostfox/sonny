@@ -4,11 +4,11 @@
     "cargo_test"
   ],
   "id": "p3c-merge-split",
-  "is_archived": false,
+  "is_archived": true,
   "is_held": false,
-  "last_event_seq": 6,
+  "last_event_seq": 9,
   "objective": "Concept 合并/拆分：检测候选间重叠（Jaccard），合并 known_facts，子聚类拆分过宽候选",
-  "phase": "review",
+  "phase": "completed",
   "read_scope": [
     "crates/memory-runtime/src/models/concept.rs",
     "crates/memory-runtime/src/pipeline",

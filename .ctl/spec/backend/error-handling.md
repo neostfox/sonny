@@ -23,9 +23,6 @@ pub enum MemoryError {
     #[error("Clustering error: {0}")]
     Clustering(String),
 
-    #[error("Entity not found: {entity_id}")]
-    EntityNotFound { entity_id: String },
-
     #[error("Concept not found: {concept_id}")]
     ConceptNotFound { concept_id: String },
 
@@ -62,18 +59,18 @@ Used throughout the crate. Never use bare `Result<T, _>`.
 ### `?` propagation everywhere in library code
 
 ```rust
-// Correct — from crates/memory-runtime/src/store/connection.rs:14
+// Correct — from crates/memory-runtime/src/store/connection.rs
 let conn = Connection::open(db_path)?;
 ```
 
 ### Never `unwrap()` in library code
 
-`unwrap()` is only acceptable in `#[cfg(test)]` blocks. In production code, use `?` or explicit error mapping.
+`unwrap()` is only acceptable in `#[cfg(test)]` blocks and LazyLock initializations. In production code, use `?` or explicit error mapping.
 
 ### CLI may `expect()` with user-facing messages
 
 ```rust
-// Acceptable — from crates/sonny-cli/src/main.rs:53
+// Acceptable — from crates/sonny-cli/src/main.rs
 let db = Database::open(&cli.db).expect("Failed to initialize database");
 ```
 
@@ -82,7 +79,7 @@ CLI is the top-level entry point. It may use `expect()` with descriptive message
 ### LLM errors preserve raw output
 
 ```rust
-// crates/memory-runtime/src/llm/traits.rs:16
+// crates/memory-runtime/src/llm/traits.rs
 serde_json::from_str(&raw).map_err(|e| MemoryError::LlmInvalidJson { source: e, raw })
 ```
 
@@ -94,7 +91,18 @@ The `raw` field captures the original LLM response for debugging. Never discard 
 
 ### Structured fields for domain errors
 
-`EntityNotFound { entity_id }`, `InvalidStatusTransition { from, to, ... }` — domain errors use named fields for structured context.
+`ConceptNotFound { concept_id }`, `InvalidStatusTransition { from, to, ... }` — domain errors use named fields for structured context.
+
+### `tracing::warn!` on parse fallbacks
+
+```rust
+// From pipeline/extract.rs — when evidence validation drops observations
+tracing::warn!(
+    "extraction validation dropped {dropped} observation(s) with unsupported evidence_text (prompt {EXTRACTION_PROMPT_VERSION})"
+);
+```
+
+Parse errors on DB values (status, source_type) use `tracing::warn!` and fall back to defaults, never crash.
 
 ## Adding New Error Variants
 

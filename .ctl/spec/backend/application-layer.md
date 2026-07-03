@@ -1,116 +1,147 @@
-# Application Layer Spec — pipeline/
+# Application Layer
+
+> Business orchestration: the full growth pipeline (ingest → extract → cluster → merge) and the recall engine.
 
 ## Purpose
 
-Orchestrates the ingest and extraction workflows: parse raw session files into `RawMemory` records, then use LLM to extract structured `Observation` triples.
-
-这是设计文档 §5 概念生长流程的前两个阶段（Observe + Extract）。后续 7 个阶段（Cluster, Name, Link, Validate, Promote, Use, Revise）尚未实现。
+Orchestrates data flow between domain types, store traits, and external providers. No direct SQLite or HTTP calls — delegates to infrastructure and interface layers.
 
 ## Directory
 
-`crates/memory-runtime/src/pipeline/`
+`crates/memory-runtime/src/pipeline/` — 4 modules
+`crates/memory-runtime/src/recall/` — 1 module (580 lines)
+`crates/memory-runtime/src/recall/` — 1 module
 
 ## Allowed Imports
 
 - `crate::models::*` — domain types
-- `crate::llm::traits::LlmProvider` — LLM interface (trait only)
-- `crate::error::{MemoryError, MemoryResult}` — error handling
-- `serde::Deserialize` — parsing LLM responses
-- `regex::Regex` — session parsing
+- `crate::store::traits::*` — store trait interfaces
+- `crate::llm::traits::LlmProvider` — LLM provider
+- `crate::embed::traits::EmbeddingProvider` — embedding provider
+- `crate::entity::*` — entity normalization
+- `crate::confidence::*` — confidence scoring
+- `crate::error::*` — error types
 
 ## Forbidden Imports
 
-- `rusqlite` — use store traits instead
-- `crate::store::*` — pipeline should receive stores as parameters, not import them
-- `reqwest` — use `LlmProvider` trait
-- `tokio` runtime — functions are `async` but don't spawn tasks
+- Direct `rusqlite::` usage — must go through store traits
+- Direct `reqwest::` usage — must go through provider traits
 
-## Patterns
+## Pipeline Modules
 
-### Session parser trait
+### ingest.rs — Session Parsing
 
 ```rust
-// crates/memory-runtime/src/pipeline/ingest.rs:6-9
 pub trait SessionParser: Send + Sync {
-    fn parse(&self, content: &str, workspace_id: &str, source_ref: &str) -> MemoryResult<Vec<RawMemory>>;
-    fn can_parse(&self, content: &str, filename: &str) -> bool;
+    fn parse(&self, content: &str, filename: &str, workspace_id: &str, source_ref: &str)
+        -> MemoryResult<Vec<RawMemory>>;
 }
 ```
 
-Two implementations: `TrellisJournalParser` (markdown journals) and `JsonSessionParser` (structured JSON). The `detect_and_parse()` function auto-selects.
+Two implementations:
+- **JournalParser**: Parses Trellis-style journal files with `## Session N` headers
+- **JsonSessionParser**: Parses JSON arrays of `{role, content}` messages
 
-### LLM-powered extraction with JSON repair
+**`detect_and_parse()`**: Auto-detects format from filename extension, returns `Vec<RawMemory>`.
+
+### extract.rs — LLM Observation Extraction
+
+- **`extract_observations()`**: Sends raw memories to LLM, parses JSON response, validates evidence (anti-hallucination gate), maps to `Observation` structs.
+- **`extract_and_dedup()`**: Extract + filter against store duplicates (matches by normalized subject+predicate+object).
+- **`reextract()`**: P2-D reverse correction — re-extract a session with current prompt, atomically supersede old observations, stamp prompt version.
+- **`EXTRACTION_PROMPT_VERSION`**: `"2026-06-14.v1"` — bumped when system prompt changes.
+
+Key constants:
+- `EXTRACTION_SYSTEM_PROMPT`: Full LLM prompt defining observation schema and extraction rules.
+
+### cluster.rs — HAC Clustering (P3-B)
 
 ```rust
-// crates/memory-runtime/src/pipeline/extract.rs:99-128
-pub async fn extract_observations(
-    raw_memories: &[RawMemory],
-    llm: &(impl LlmProvider + Sync),
-) -> MemoryResult<Vec<Observation>>
+pub struct ClusterEngine { config: ClusterConfig }
 ```
 
-- Takes `&[RawMemory]` and any `LlmProvider` impl
-- Returns `Vec<Observation>` — pure domain output
-- Includes `repair_json()` fallback for malformed LLM output
-- LLM prompt is `const EXTRACTION_SYSTEM_PROMPT` with structured JSON schema
+- **`combined_distance()`**: Weighted blend of entity Jaccard + embedding cosine distance.
+- **`cluster()`**: Hierarchical Agglomerative Clustering using `linfa-clustering`. Produces `ObservationCluster` groups.
+- **`cluster_to_candidate()`**: Converts each cluster into a `ConceptCandidate` with merged facts/evidence.
+- Union-Find for cluster merging. Threshold-based cut.
 
-### Generic trait bounds over concrete impls
+### merge.rs — Candidate Merge/Split (P3-C)
 
-The `extract_observations` function uses `impl LlmProvider + Sync` rather than `Box<dyn LlmProvider>`. This avoids allocation and supports both real and mock providers without trait object overhead.
+```rust
+pub struct MergeSplitEngine { config: MergeSplitConfig }
+```
 
-## Design Gaps
+- **`merge_group()`**: Merges overlapping candidates via Jaccard similarity on entity sets and source terms.
+- **`split_candidate()`**: Splits a candidate with heterogeneous observations into sub-groups.
+- Union-Find for group detection. Jaccard threshold for merge eligibility.
 
-### D6: Extract 后无去重步骤
+## Recall Module
 
-设计 §3.3 离线链路明确包含 Deduplication。`ObservationStore::check_duplicate()` 存在但 `extract_observations()` 从未调用。
+### recall/mod.rs — RecallEngine (P4-A)
 
-**影响**: 两次 ingest 同一 session 产生重复 Observations。两个 session 讨论同一话题产生语义重复（表述不同但内容相同的三元组）。
+```rust
+pub struct RecallEngine<'a, C, E, P>
+where
+    C: ConceptStore,
+    E: EmbeddingStore,
+    P: EmbeddingProvider,
+{
+    concepts: &'a C,
 
-**需要**:
-1. 在 extract 后对每个 Observation 调用 `check_duplicate()`
-2. 语义去重需要 embedding 相似度（当前无实现）
+**Three-stage recall pipeline:**
 
-### D7: Extract 后无实体归一化
+1. **Intent Classification** (`classify_intent()`): Rule-based bilingual keyword matching → `Intent` enum. No LLM call. Supports Chinese and English keywords per intent.
+2. **Entity Matching** (`entity_recall()`): Extracts entities from query via `extract_query_entities()`, finds concepts via `find_by_entities()`.
+3. **Semantic Search** (`semantic_recall()`): Embeds query via `EmbeddingProvider`, searches `EmbeddingStore` for top-K similar concepts.
 
-`canonical_key()` 和 `EntityNormalizer` 存在但 extract pipeline 不调用。LLM 返回的 `subject_text` 和 `object_text` 是原始字符串。
+**Key Methods:**
+- `recall(query, workspace_id)` — Full pipeline with default 1500 token budget
+- `recall_with_budget(query, workspace_id, max_tokens)` — Full pipeline with custom budget
+- `rank(query, workspace_id)` — Returns `Vec<RecallScore>` sorted by composite score
 
-**影响**: 同一实体（"POSMASK"、"POSMASK 表"、"posmask"）存储为不同值，后续聚类无法匹配。
+**Scoring:**
+- `SEMANTIC_WEIGHT = 0.6`, `ENTITY_WEIGHT = 0.4`
+- `SEMANTIC_TOP_K = 10`, `SEMANTIC_THRESHOLD = 0.0`
+- `total_score = semantic_score × 0.6 + entity_score × 0.4`
+- `RecallScore` tracks both `semantic_score` and `entity_score` separately
 
-**需要**: extract 后对 `subject_text` 和 `object_text` 执行归一化。
+**Context Building** (`build_context()`):
+- Budget allocation via `RecallBudget::for_intent(intent, max_tokens)`: Intent-specific percentages (e.g., `VerifyFact`: 45% facts, 20% rejected, 10% task)
+- `estimate_tokens()`: `text.chars().count().div_ceil(4).max(1)` — rough 4-chars-per-token heuristic
+- `token_count` field on `MemoryContext` is enforced by `enforce_total_budget()`
+- `enforce_total_budget()`: pops lowest-priority items when over budget (priority: entities → task_state → rejected → preferences → facts)
+- `truncate_section()`: per-section truncation before global budget enforcement
 
-### D10: Session Distiller 阶段缺失
+**Entity Extraction** (`extract_query_entities()`):
+- Splits on non-alphanumeric/non-Unicode chars, filters 2+ char tokens
+- `canonical_key_light()` normalization + stopword filtering
+- `entity_overlap()`: Jaccard similarity between query entities and concept's `related_entities_json`
 
-设计 §12.2 定义了 Session Distiller：从完整 session 的全局视角提炼结构化记忆（架构事实、Bug修复路径等）。
+**Post-Recall Updates:**
+- Top 3 concepts get `update_recall_stats()` called (increments `recall_count`, updates `last_recalled_at`)
+- Successful recall counted when `current_concept` is present
+- `token_count` field on `MemoryContext` is enforced by `enforce_total_budget()`.
 
-当前 `extract_observations()` 从每条消息独立抽取三元组。区别：
+**Entity Extraction** (`extract_query_entities()`):
+- Regex-based: splits on whitespace/punctuation, filters stopwords, normalizes case.
+- `entity_overlap()`: Jaccard similarity between query entities and concept's `related_entities_json`.
 
-| | Observation Extractor | Session Distiller |
-|---|---|---|
-| 视角 | 每条消息 | 整个 session |
-| 输出 | 独立三元组 | 结构化记忆（MemoryItem） |
-| 上下文理解 | 无跨消息推理 | 需要理解 session 全局 |
+## Anti-Patterns
 
-### 无长 session 分块策略
+### ❌ Bypassing store traits
 
-`format_messages()` 把所有 RawMemory 拼成一个 prompt。无 token 限制检查。长 session 会超过 LLM context window。
+```rust
+// ❌ Direct SQL in pipeline
+conn.execute("INSERT INTO observation ...", params![])?;
+```
 
-### 无 extraction prompt 版本管理
+Instead: call `store.insert(&observation)?`.
 
-`EXTRACTION_SYSTEM_PROMPT` 是 hardcoded const。如果修改 prompt，之前提取的 Observations 有不同语义，但无版本标记。
+### ❌ Hardcoded thresholds
 
-## Anti-patterns
+```rust
+// ❌ Magic numbers scattered in code
+if score > 0.5 { ... }
+```
 
-| Don't | Why | Instead |
-|-------|-----|---------|
-| Call store methods inside pipeline functions | Couples orchestration to infrastructure | Return results, let the caller persist |
-| Hard-code a specific LLM provider | Breaks testability | Accept `impl LlmProvider` parameter |
-| Use `unwrap()` on LLM responses | LLM output is unreliable by nature | Use `repair_json()` + `MemoryError::LlmInvalidJson` |
-| Skip the `can_parse()` check | Silent wrong-format parsing | Always check via `SessionParser::can_parse()` |
-| 发送超长 prompt 给 LLM | 超过 context window 导致截断 | 分块发送 + 合并结果 |
-| 跳过去重直接写入 | 重复 session 产生重复数据 | extract 后调用 check_duplicate |
-
-## Testing
-
-- Unit tests with `MockLlmProvider` from `memory-test-fixtures`
-- Integration tests in `crates/memory-runtime/tests/integration_test.rs`
-- Test JSON repair logic with malformed inputs (see `extract.rs` `#[cfg(test)]` module)
+Instead: use `SEMANTIC_THRESHOLD`, `SEMANTIC_WEIGHT`, `ENTITY_WEIGHT` constants at module top.

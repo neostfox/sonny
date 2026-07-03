@@ -8,10 +8,9 @@
 | 🔵 Blue | Domain — Pure data types, no I/O imports |
 | 🟢 Green | Interface — Trait definitions for external services |
 | 🔴 Red | Infrastructure — SQLite persistence, migrations |
-| 🟣 Purple | Service — Cross-cutting domain logic |
-| ⬜ White | Application — Business orchestration |
+| 🟣 Purple | Service — Cross-cutting domain logic (confidence, entity) |
+| ⬜ White | Application — Business orchestration (pipeline, recall) |
 | ⚪ Gray | Shared — Configuration, utilities |
-| ⏳ Deferred | Stub modules awaiting future phase |
 | 💀 Dead | Code/table exists but no code reads or writes it |
 
 ## Tree
@@ -19,91 +18,83 @@
 ```
 crates/
 ├── memory-runtime/                          # Core library crate
-│   ├── Cargo.toml                           # Dependencies: rusqlite, thiserror, ndarray, linfa, ...
+│   ├── Cargo.toml                           # Dependencies: rusqlite, thiserror, ndarray, linfa, reqwest, tokio, ...
 │   ├── src/
-│   │   ├── lib.rs                           # Public module re-exports
+│   │   ├── lib.rs                           # Public module re-exports (11 modules)
 │   │   ├── config.rs                        # ⚪ Settings struct + defaults + env overrides
-│   │   │                                    # ⚠️ dirs_home() 不支持 Windows
-│   │   ├── error.rs                         # ⚪ MemoryError enum (thiserror derive)
+│   │   ├── error.rs                         # ⚪ MemoryError enum (thiserror derive, 11 variants)
 │   │   │
-│   │   ├── models/                          # 🔵 Domain — Pure data types
+│   │   ├── models/                          # 🔵 Domain — Pure data types (10 files)
 │   │   │   ├── mod.rs                       # Re-exports all model submodules
 │   │   │   ├── concept.rs                   # Concept, ConceptCandidate, ConceptType
-│   │   │   │                                # ⚠️ ConceptCandidate.status 是 ObservationStatus
-│   │   │   │                                #    应使用独立生命周期枚举 (D4)
-│   │   │   ├── embedding.rs                 # EmbeddingRef, EmbeddingSearchResult
+│   │   │   ├── embedding.rs                 # EmbeddingRef, EmbeddingSourceType, EmbeddingSearchResult
 │   │   │   ├── evidence.rs                  # Evidence struct
-│   │   │   ├── feedback.rs                  # FeedbackType enum, FeedbackResult
-│   │   │   │                                # ⚠️ 无 feedback 表，无调用者
+│   │   │   ├── feedback.rs                  # FeedbackType enum, FeedbackResult (model only, no table)
 │   │   │   ├── hierarchy.rs                 # HierarchyType, RelationType enums
-│   │   │   ├── memory_item.rs               # 💀 MemoryItem, MemoryType — 无代码读写 (D3)
-│   │   │   ├── observation.rs               # Observation, ObservationSourceType
-│   │   │   │                                # ⚠️ 三元组太弱，无法表达排障路径等 (D2)
+│   │   │   ├── observation.rs               # Observation, ObservationSourceType, MemoryType
+│   │   │   ├── predicate.rs                 # Predicate enum (7 variants) + normalize_predicate()
 │   │   │   ├── raw_memory.rs                # RawMemory, SourceType
-│   │   │   ├── recall.rs                    # MemoryContext, RecallScore, Intent
-│   │   │   │                                # ⚠️ token_count 字段不生效 (D8)
-│   │   │   └── status.rs                    # ObservationStatus, ConceptStatus enums
+│   │   │   ├── recall.rs                    # MemoryContext, RecallScore, Intent, RecallBudget
+│   │   │   └── status.rs                    # ObservationStatus, ConceptStatus, CandidateStatus
 │   │   │
 │   │   ├── confidence/                      # 🟣 Service — Beta-distribution confidence
-│   │   │   └── mod.rs                       # BetaConfidence, EvidenceType, weight table
-│   │   │                                    # ⚠️ 无 pipeline 调用者，所有 confidence 永远 0.5 (D5)
+│   │   │   └── mod.rs                       # BetaConfidence, EvidenceType (12 types), weight table
+│   │   │                                    # ✅ Used by extract pipeline + recall stats
 │   │   │
 │   │   ├── entity/                          # 🟣 Service — Entity normalization
-│   │   │   └── mod.rs                       # canonical_key(), EntityNormalizer
-│   │   │                                    # ⚠️ 无 pipeline 调用者，LLM 产出实体未归一化 (D7)
+│   │   │   └── mod.rs                       # canonical_key(), canonical_key_light()
+│   │   │                                    # ✅ Used by cluster engine for entity Jaccard
 │   │   │
-│   │   ├── pipeline/                        # ⬜ Application — Ingest + Extract orchestration
-│   │   │   ├── mod.rs                       # Re-exports ingest, extract
-│   │   │   ├── ingest.rs                    # SessionParser trait, TrellisJournalParser, JsonSessionParser
-│   │   │   │                                # ⚠️ extract_session_id 每次调用编译 Regex
-│   │   │   └── extract.rs                   # extract_observations(), LLM-powered extraction
-│   │   │                                    # ⚠️ 无去重步骤 (D6)
-│   │   │                                    # ⚠️ 无实体归一化步骤 (D7)
-│   │   │                                    # ⚠️ 无长 session 分块策略
+│   │   ├── pipeline/                        # ⬜ Application — Full growth pipeline
+│   │   │   ├── mod.rs                       # Re-exports: cluster, extract, ingest, merge
+│   │   │   ├── ingest.rs                    # SessionParser trait, JournalParser, JsonSessionParser
+│   │   │   │                                # ✅ Regex via LazyLock, detect_and_parse()
+│   │   │   ├── extract.rs                   # extract_observations(), extract_and_dedup(), reextract()
+│   │   │   │                                # ✅ Anti-hallucination gate, evidence validation
+│   │   │   ├── cluster.rs                   # ClusterEngine: HAC + embedding distance
+│   │   │   │                                # ✅ P3-B: combined_distance, ObservationCluster
+│   │   │   └── merge.rs                     # MergeSplitEngine: candidate merging + splitting
+│   │   │                                    # ✅ P3-C: merge_group, split_candidate, Jaccard
+│   │   │
+│   │   ├── recall/                          # ⬜ Application — Recall engine
+│   │   │   └── mod.rs                       # ✅ P4-A: RecallEngine, classify_intent(), build_context()
+│   │   │                                    #    Intent bilingual classification + entity match + embedding semantic search
+│   │   │                                    #    Dynamic token budget enforcement + recall stats update
 │   │   │
 │   │   ├── store/                           # 🔴 Infrastructure — SQLite persistence
 │   │   │   ├── mod.rs                       # Re-exports all store modules
-│   │   │   ├── connection.rs                # Database struct (open, open_in_memory)
-│   │   │   │                                # ⚠️ conn 被 move 后 Database 变空壳
-│   │   │   │                                #    多 store 无法共享连接
-│   │   │   ├── migration.rs                 # Versioned migration runner
-│   │   │   ├── traits.rs                    # RawMemoryStore, ObservationStore, ConceptStore, EmbeddingStore traits
-│   │   │   │                                # ⚠️ update_status 接受 &str 不是枚举类型
+│   │   │   ├── connection.rs                # Database struct (Arc<Mutex<Connection>>, WAL, FK)
+│   │   │   ├── migration.rs                 # 6 versioned migrations via user_version PRAGMA
+│   │   │   ├── traits.rs                    # RawMemoryStore, ObservationStore, ConceptStore, EmbeddingStore
 │   │   │   ├── raw_memory_store.rs          # SqliteRawMemoryStore impl
-│   │   │   ├── observation_store.rs         # SqliteObservationStore impl
-│   │   │   │                                # ⚠️ obs_params 每次 17 个 Box<dyn ToSql> 堆分配
-│   │   │   │                                # ⚠️ list_by_workspace 无 LIMIT
-│   │   │   │                                # ⚠️ parse_observation_status 默认值无日志
-│   │   │   ├── concept_store.rs             # SqliteConceptStore impl
-│   │   │   │                                # ⚠️ find_by_entities 用 LIKE 搜索 JSON — 假阳性 (C2)
-│   │   │   │                                # ⚠️ update_recall_stats 不检查行是否存在
-│   │   │   │                                # ⚠️ candidate_params 每次 22 个 Box<dyn ToSql>
-│   │   │   └── embedding_store.rs           # ⏳ Placeholder (Phase 2)
+│   │   │   ├── observation_store.rs         # SqliteObservationStore: CRUD + find_coclaim + replace_session
+│   │   │   ├── concept_store.rs             # SqliteConceptStore: CRUD + entity JOIN + recall stats
+│   │   │   └── embedding_store.rs           # SqliteEmbeddingStore: BLOB vector storage + cosine search
 │   │   │
 │   │   ├── llm/                             # 🟢 Interface — LLM provider abstraction
 │   │   │   ├── mod.rs                       # Re-exports traits
-│   │   │   └── traits.rs                    # LlmProvider async trait
+│   │   │   └── traits.rs                    # LlmProvider async trait (complete, complete_json, health_check)
 │   │   │
-│   │   ├── embed/                           # 🟢 Interface — Embedding service abstraction
-│   │   │   ├── mod.rs                       # Re-exports traits
-│   │   │   └── traits.rs                    # EmbeddingService trait (embed, embed_batch)
-│   │   │                                    # ⏳ 无实现，聚类和召回依赖此接口
+│   │   ├── embed/                           # 🟢 Interface + Impl — Embedding service
+│   │   │   ├── mod.rs                       # build_embedding_service(), embed_and_store()
+│   │   │   ├── traits.rs                    # EmbeddingProvider async trait (embed, embed_batch, dim)
+│   │   │   └── openai.rs                    # ✅ OpenAiCompatibleEmbeddingProvider (reqwest HTTP)
 │   │   │
-│   │   ├── recall/                          # ⏳ Deferred — Phase 3
-│   │   │   └── mod.rs                       # Stub comment
-│   │   │
-│   │   ├── feedback/                        # ⏳ Deferred — Phase 3
-│   │   │   └── mod.rs                       # Stub comment
+│   │   ├── feedback/                        # ⏳ Deferred — Feedback subsystem
+│   │   │   └── mod.rs                       # Stub: "Phase 3"
 │   │   │
 │   │   └── migrations/
-│   │       └── 001_initial.sql              # Schema: 6 张表 + 索引
-│   │                                        # 💀 memory_item 表存在但无代码读写
-│   │                                        # ❌ 缺少 observation_candidate_link 表 (D1)
-│   │                                        # ❌ 缺少 feedback 表 (D9)
+│   │       ├── 001_initial.sql              # DDL: raw_memory, observation, concept_candidate,
+│   │       │                                #   concept, entity_alias (memory_item dropped in 003)
+│   │       ├── 002_entity_concept.sql       # entity_concept JOIN table (P0-C)
+│   │       ├── 003_p1_model_alignment.sql   # observation.confidence → extraction_confidence,
+│   │       │                                #   +memory_type_candidate, DROP memory_item
+│   │       ├── 004_p2c_observation_coclaim.sql  # extraction_batch_id + observation_coclaim (P2-C)
+│   │       ├── 005_p2d_reverse_correction.sql   # raw_memory.extraction_version + superseded_by (P2-D)
+│   │       └── 006_p3a_embedding_storage.sql    # embedding BLOB table (P3-A)
 │   │
 │   └── tests/
-│       └── integration_test.rs              # 7 个集成测试
-│                                            # ⚠️ 用 std::mem::replace 传连接 — 绕过所有权问题
+│       └── integration_test.rs              # 12 integration tests (full pipeline + embed + recall)
 │
 ├── sonny-cli/                               # 🟠 Entry — CLI binary
 │   ├── Cargo.toml                           # Depends on memory-runtime, clap, tokio, tracing
@@ -114,39 +105,38 @@ crates/
 └── memory-test-fixtures/                    # ⚪ Shared — Test helpers
     ├── Cargo.toml                           # Depends on memory-runtime, async-trait
     └── src/
-        ├── lib.rs                           # Re-exports mock_llm
-        └── mock_llm.rs                      # MockLlmProvider: pattern-matched responses, call log
+        ├── lib.rs                           # Re-exports mock_llm, stub_embedding
+        ├── mock_llm.rs                      # MockLlmProvider: pattern-matched responses, call log
+        └── stub_embedding.rs                # StubEmbeddingService: FNV-1a hash → deterministic vector
 ```
 
 ## Key Files
 
-| Path | Role | Description | Issues |
-|------|------|-------------|--------|
-| `crates/memory-runtime/src/lib.rs` | Shared | Public API surface | |
-| `crates/memory-runtime/src/error.rs` | Shared | `MemoryError` + `MemoryResult<T>` | |
-| `crates/memory-runtime/src/config.rs` | Shared | `Settings` struct | `dirs_home()` 不支持 Windows |
-| `crates/memory-runtime/src/models/status.rs` | Domain | 两个状态机 | `ConceptCandidate` 应该用 `ConceptStatus` 不是 `ObservationStatus` |
-| `crates/memory-runtime/src/models/observation.rs` | Domain | 三元组 Observation | 无法表达排障路径、任务状态等 (D2) |
-| `crates/memory-runtime/src/models/concept.rs` | Domain | Concept + ConceptCandidate | Candidate 无法增量生长 (D1) |
-| `crates/memory-runtime/src/models/recall.rs` | Domain | MemoryContext + Intent | `token_count` 不生效 |
-| `crates/memory-runtime/src/models/memory_item.rs` | Domain | MemoryItem + MemoryType | 💀 死代码，无任何读写 (D3) |
-| `crates/memory-runtime/src/confidence/mod.rs` | Service | BetaConfidence | 无 pipeline 调用者 (D5) |
-| `crates/memory-runtime/src/entity/mod.rs` | Service | canonical_key() + EntityNormalizer | 无 pipeline 调用者 (D7) |
-| `crates/memory-runtime/src/pipeline/ingest.rs` | Application | SessionParser + 两实现 | |
-| `crates/memory-runtime/src/pipeline/extract.rs` | Application | extract_observations() | 无去重、无归一化、无分块 |
-| `crates/memory-runtime/src/store/traits.rs` | Infrastructure | Store trait 定义 | `update_status` 接受裸 `&str` |
-| `crates/memory-runtime/src/store/connection.rs` | Infrastructure | Database struct | 连接 move 后变空壳 |
-| `crates/memory-runtime/src/store/concept_store.rs` | Infrastructure | 最大 store 实现 | LIKE 搜索 JSON 有假阳性 |
-| `crates/memory-runtime/src/store/observation_store.rs` | Infrastructure | Observation CRUD | 无 LIMIT、每次 17 个堆分配 |
-| `crates/memory-runtime/src/llm/traits.rs` | Interface | LlmProvider async trait | |
-| `crates/memory-runtime/src/embed/traits.rs` | Interface | EmbeddingService trait | 无实现 |
-| `crates/memory-runtime/src/migrations/001_initial.sql` | Infrastructure | 完整 DDL | 缺 link 表、feedback 表 |
-| `crates/sonny-cli/src/main.rs` | Entry | CLI binary | 3/8 命令实现 |
-| `crates/memory-test-fixtures/src/mock_llm.rs` | Shared | MockLlmProvider | |
-| `crates/memory-runtime/tests/integration_test.rs` | Verification | 7 个集成测试 | 无多 store 并发测试 |
-
-## 设计文档
-
-| Path | Description |
-|------|-------------|
-| `docs/memory-runtime-design.md` | 1307 行完整技术设计文档，定义闭环、对象模型、9 阶段生长流程 |
+| Path | Role | Description |
+|------|------|-------------|
+| `crates/memory-runtime/src/lib.rs` | Shared | Public API surface (11 modules) |
+| `crates/memory-runtime/src/error.rs` | Shared | `MemoryError` (11 variants) + `MemoryResult<T>` |
+| `crates/memory-runtime/src/config.rs` | Shared | `Settings` struct with LLM/Embedding/Cluster/Recall/Confidence configs |
+| `crates/memory-runtime/src/models/status.rs` | Domain | 3 status machines: ObservationStatus, ConceptStatus, CandidateStatus |
+| `crates/memory-runtime/src/models/observation.rs` | Domain | Observation + MemoryType taxonomy + ObservationSourceType |
+| `crates/memory-runtime/src/models/concept.rs` | Domain | Concept + ConceptCandidate + ConceptType |
+| `crates/memory-runtime/src/models/recall.rs` | Domain | MemoryContext (token_count enforced) + RecallScore + Intent + RecallBudget |
+| `crates/memory-runtime/src/models/predicate.rs` | Domain | Predicate enum (7 variants) + normalize_predicate() |
+| `crates/memory-runtime/src/confidence/mod.rs` | Service | BetaConfidence + 12 EvidenceType weights |
+| `crates/memory-runtime/src/entity/mod.rs` | Service | canonical_key() + canonical_key_light() |
+| `crates/memory-runtime/src/pipeline/ingest.rs` | Application | SessionParser + 2 impls (Journal, JSON) |
+| `crates/memory-runtime/src/pipeline/extract.rs` | Application | LLM extraction + dedup + reextract (P2-D) |
+| `crates/memory-runtime/src/pipeline/cluster.rs` | Application | HAC clustering + embedding distance (P3-B) |
+| `crates/memory-runtime/src/pipeline/merge.rs` | Application | Candidate merge/split via Jaccard (P3-C) |
+| `crates/memory-runtime/src/recall/mod.rs` | Application | RecallEngine: intent+entity+semantic (P4-A) |
+| `crates/memory-runtime/src/store/traits.rs` | Infrastructure | 4 store traits (RawMemory, Observation, Concept, Embedding) |
+| `crates/memory-runtime/src/store/connection.rs` | Infrastructure | Database: `Arc<Mutex<Connection>>` + WAL + FK |
+| `crates/memory-runtime/src/store/embedding_store.rs` | Infrastructure | BLOB vector storage + cosine similarity search |
+| `crates/memory-runtime/src/embed/traits.rs` | Interface | EmbeddingProvider async trait |
+| `crates/memory-runtime/src/embed/openai.rs` | Interface | OpenAI-compatible HTTP embedding client |
+| `crates/memory-runtime/src/llm/traits.rs` | Interface | LlmProvider async trait |
+| `crates/memory-runtime/src/store/migration.rs` | Infrastructure | 6 versioned migrations |
+| `crates/sonny-cli/src/main.rs` | Entry | CLI binary (3/8 commands) |
+| `crates/memory-test-fixtures/src/mock_llm.rs` | Shared | MockLlmProvider for tests |
+| `crates/memory-test-fixtures/src/stub_embedding.rs` | Shared | StubEmbeddingService (deterministic, network-free) |
+| `crates/memory-runtime/tests/integration_test.rs` | Verification | 12 integration tests |

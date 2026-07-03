@@ -1,132 +1,128 @@
-# Service Layer Spec — entity/ and confidence/
+# Service Layer
+
+> Cross-cutting domain logic: confidence scoring, entity normalization, and recall orchestration.
 
 ## Purpose
 
-Cross-cutting domain services: entity normalization (canonical key generation + alias management) and confidence scoring (beta-distribution Bayesian updates).
+Pure domain logic that operates on models but has no I/O. Confidence computes beta-distribution updates. Entity normalization canonicalizes names. Recall orchestrates the three-stage retrieval pipeline.
 
-设计文档 §5.3 要求实体重叠作为聚类依据（entity normalization），§5.6 要求证据升权降权（confidence scoring）。两个服务的数学模型完整，但都没有 pipeline 集成点。
+## Directory
 
-## Directories
-
-- `crates/memory-runtime/src/entity/` — Entity normalization
-- `crates/memory-runtime/src/confidence/` — Confidence scoring
+`crates/memory-runtime/src/confidence/` — 1 module
+`crates/memory-runtime/src/entity/` — 1 module
+`crates/memory-runtime/src/recall/` — 1 module (application layer, but orchestrates service logic)
 
 ## Allowed Imports
 
-- `crate::models` — domain types (minimal usage)
-- `crate::error::MemoryResult` — error handling
-- `rusqlite::Connection` — entity normalization reads entity_alias table (entity only)
-- `unicode_normalization` — NFKC normalization (entity only)
-- `std::fmt` — Display impl (confidence only)
+- `crate::models::*` — domain types
+- `crate::store::traits::*` — for RecallEngine (store queries)
+- `crate::embed::traits::*` — for RecallEngine (embedding search)
+- `crate::error::*` — error types
 
-## Forbidden Imports
+## Confidence (`confidence/mod.rs`)
 
-- `crate::pipeline` — services don't orchestrate workflows
-- `crate::store::traits` — services access DB directly via `&Connection`, not through store traits
-- `reqwest`, `tokio` — no async I/O
-
-## Patterns
-
-### Entity normalization pipeline
+### BetaConfidence
 
 ```rust
-// crates/memory-runtime/src/entity/mod.rs:23-62
-pub fn canonical_key(raw: &str) -> String
-```
-
-Pipeline: trim → NFKC normalize → strip PascalCase suffixes → lowercase → normalize separators → collapse underscores → strip underscore suffixes.
-
-Example transformations:
-- `UserModel` → `user`
-- `user_service` → `user`
-- `POSMASK` → `posmask`
-- `order-table` → `order`
-
-### EntityNormalizer with database aliases
-
-```rust
-// crates/memory-runtime/src/entity/mod.rs:107-109
-pub struct EntityNormalizer<'a> {
-    conn: &'a Connection,
-}
-```
-
-Reads `entity_alias` table for confirmed aliases. Falls back to `canonical_key()` when no alias found.
-
-### Beta-distribution confidence
-
-```rust
-// crates/memory-runtime/src/confidence/mod.rs:4-7
 pub struct BetaConfidence {
-    pub alpha: f32,
-    pub beta: f32,
+    pub alpha: f64,
+    pub beta: f64,
 }
 ```
 
-- Positive evidence increments `alpha` (e.g., user confirmation: +2.0)
-- Negative evidence increments `beta` (e.g., user negation: +3.0)
-- Confidence = `alpha / (alpha + beta)`
-- Prior: `alpha = 1.0, beta = 1.0` (uniform)
+- **`update(evidence_type)`**: Applies evidence weight to alpha/beta.
+- **`mean()`**: `alpha / (alpha + beta)` — current confidence score.
+- **`Default`**: `alpha=1.0, beta=1.0` — uniform prior (0.5 mean).
 
-### Evidence weight table
+### EvidenceType (12 types)
+
+Positive evidence: `UserConfirmation`, `FileEvidence`, `RepeatedOccurrence`, `CrossSession3Plus`, `CrossSession2`, `HumanReviewConfirm`, `RecallNotCorrected`.
+Negative evidence: `UserNegation`, `ConflictingEvidence`, `RecallCorrected`, `InternalConflict`, `AssistantSpeculation`.
+
+Each has (alpha_weight, beta_weight) in `EVIDENCE_WEIGHTS`. Test `all_evidence_types_have_weights` enforces full coverage.
+
+## Entity Normalization (`entity/mod.rs`)
+
+### canonical_key_light(raw) → String
+
+Case + separator normalization only. `"UserService"` stays distinct from `"UserModel"`, but `"user_model"` and `"User Model"` both become `"user_model"`.
+
+### canonical_key(raw) → String
+
+Aggressive: also strips semantic suffixes (`_service`, `_table`, `_Impl`, etc.). Used for alias matching / clustering where different surface forms must collapse.
+
+### Pipeline
+
+1. NFKC Unicode normalization
+2. Lowercase
+3. Separator normalization (spaces/hyphens → underscores)
+4. Underscore collapse
+5. (Aggressive only) PascalCase suffix stripping → underscore suffix stripping
+
+## RecallEngine (`recall/mod.rs`)
+
+### Three-Stage Pipeline
+
+1. **Intent Classification** (`classify_intent()`):
+   - Rule-based: keyword matching on query text.
+   - `ContinueInvestigation`: "继续", "what about", "how does"
+   - `VerifyFact`: "是不是", "is it true", "confirm"
+   - `CorrectMistake`: "错了", "wrong", "incorrect"
+   - `AddKnowledge`: "记录", "remember", "note"
+   - `ReviewHistory`: "之前", "previously", "history"
+   - Default: `GeneralQuery`
+
+2. **Entity Matching** (`entity_recall()`):
+   - `extract_query_entities()`: Regex tokenization + stopword filtering.
+   - `entity_overlap()`: Jaccard similarity between query entities and concept's `related_entities_json`.
+   - Returns concepts where `entity_score > 0`.
+
+3. **Semantic Search** (`semantic_recall()`):
+   - Embeds query via `EmbeddingProvider`.
+   - Searches `EmbeddingStore` for top-K similar embeddings.
+   - Returns concepts with `semantic_score` from cosine similarity.
+
+### Scoring
 
 ```rust
-// crates/memory-runtime/src/confidence/mod.rs:46-60
-const EVIDENCE_WEIGHTS: [(EvidenceType, f32, f32); 13] = [
-    (EvidenceType::UserConfirmation,    2.0, 0.0),
-    (EvidenceType::UserNegation,        0.0, 3.0),
-    // ...
-];
+pub fn score_concept(
+    concept: &Concept,
+    query_entities: &[String],
+    query_embedding: Option<&Array1<f32>>,
+    concept_embedding: Option<&Array1<f32>>,
+) -> RecallScore
 ```
 
-13 evidence types with fixed (alpha_delta, beta_delta) weights. `LongInactivity` requires caller-scaled beta.
+- `total_score = SEMANTIC_WEIGHT * semantic_score + ENTITY_WEIGHT * entity_score`
+- `SEMANTIC_WEIGHT = 0.6`, `ENTITY_WEIGHT = 0.4`
+- Tiebreaker: higher confidence wins.
 
-## Design Gaps
+### Context Building
 
-### D5: BetaConfidence 无 pipeline 集成点
+```rust
+pub fn build_context(
+    workspace_id: &str,
+    intent: &Intent,
+    concepts: &[Concept],
+    max_tokens: usize,
+) -> MemoryContext
+```
 
-设计 §5.6 Validate 阶段要求证据自动升降权。实现中：
+- Allocates budget per section via `RecallBudget`.
+- `token_count` is enforced: `enforce_total_budget()` pops lowest-priority items when over budget.
+- `estimate_tokens()`: `text.chars().count().div_ceil(4)` — 4 chars ≈ 1 token heuristic.
 
-| 自动化行为 | 代码 | 调用者 | 状态 |
-|-----------|------|--------|------|
-| 用户确认 → alpha+2 | `BetaConfidence::update(UserConfirmation)` | 无 | ❌ |
-| 多次重复 → alpha+1 | `BetaConfidence::update(RepeatedOccurrence)` | 无 | ❌ |
-| 用户否定 → beta+3 | `BetaConfidence::update(UserNegation)` | 无 | ❌ |
-| 长期未使用 → beta 衰减 | `BetaConfidence::update_with_decay(days)` | 无 | ❌ |
-| cross-session 3次 → auto_confirm | `ConfidenceConfig.auto_confirm_sessions` | 无 | ❌ |
+## Anti-Patterns
 
-**后果**: DB 中所有 `evidence_alpha` 和 `evidence_beta` 永远是初始值 `1.0`。`Observation.confidence` 永远是 `0.5`。自动确认/自动降权永远不会发生。
+### ❌ Side effects in confidence/entity functions
 
-**需要**:
-1. extract 后根据 `ObservationSourceType` 调用 `update()` 计算初始 confidence
-2. 后台任务定期扫描 long-inactive concepts 调用 `update_with_decay()`
-3. feedback 后根据反馈类型调用 `update()`
+```rust
+// ❌ Must not write to store
+pub fn update(&mut self, evidence: EvidenceType, store: &impl ObservationStore) { ... }
+```
 
-### D7: Entity Normalization 无 pipeline 调用者
+Instead: confidence update is pure math. Caller persists the result.
 
-`canonical_key()` 有 11 个单元测试，`EntityNormalizer` 有 DB-backed alias 查询。但：
+### ❌ LLM calls in recall
 
-- `extract_observations()` 不调用 entity normalization
-- Observation 的 `subject_text` / `object_text` 是 LLM 返回的原始字符串
-- 同一实体可能被表述为 "POSMASK"、"POSMASK 表"、"posmask"——存储为不同记录
-
-**影响**: 设计 §5.3 Cluster 阶段要求“实体重叠”作为聚类依据。如果实体名称没有归一化，聚类无法工作。
-
-**需要**: extract 后对 `subject_text` 和 `object_text` 执行 `canonical_key()` 归一化。用归一化后的 key 做 clustering。
-
-## Anti-patterns
-
-| Don't | Why | Instead |
-|-------|-----|---------|
-| Normalize at store time only | Aliases may change | Normalize at query time too |
-| Hard-code confidence thresholds in domain types | Configuration varies by deployment | Use `ConfidenceConfig` from `config.rs` |
-| Skip NFKC normalization | Unicode equivalence causes duplicate entities | Always normalize first |
-| Access store traits from entity/confidence | Creates circular dependency | Use `&Connection` directly in `EntityNormalizer` |
-
-## Testing
-
-- `canonical_key()` has extensive unit tests covering all suffix types
-- `BetaConfidence` tests verify weight application, mean calculation, Display format
-- Integration tests verify entity normalization round-trip with database
-- **缺失**: pipeline 集成测试 — extract 后 confidence 是否更新
-- **缺失**: pipeline 集成测试 — extract 后 entity 是否归一化
+Recall is fully local — intent classification is rule-based, entity matching is set operations, semantic search is embedding cosine. No LLM round-trips during recall.

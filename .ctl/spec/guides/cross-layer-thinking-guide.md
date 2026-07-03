@@ -2,48 +2,82 @@
 
 When making changes that span multiple modules, consider the following:
 
-## 概念生长 Pipeline Checklist
+## Current Implementation Status
 
-设计文档 §5 定义了 9 个阶段。实现任何后续阶段前：
+| Stage | Status | Key Files |
+|-------|--------|-----------|
+| Observe (Ingest) | ✅ Complete | `pipeline/ingest.rs` |
+| Extract | ✅ Complete | `pipeline/extract.rs` |
+| Validate (Confidence) | ✅ Complete | `confidence/mod.rs` |
+| Embed | ✅ Complete (P3-A) | `embed/`, `store/embedding_store.rs` |
+| Cluster | ✅ Complete (P3-B) | `pipeline/cluster.rs` |
+| Merge/Split | ✅ Complete (P3-C) | `pipeline/merge.rs` |
+| Recall | ✅ Complete (P4-A) | `recall/mod.rs` |
+| Feedback | ⏳ Planned (P4-B) | `feedback/mod.rs` (stub) |
 
-### Cluster（D1 — 需要数据模型变更）
+## Recall Pipeline Checklist
 
-1. 新增 `observation_candidate_link` 表
-2. 设计聚类算法：实体重叠 + embedding 相似度 + 时间邻近
-3. Entity normalization 必须先接入 extract pipeline（D7）
-4. Embedding 必须先实现（当前全是 stub）
+P4-A is implemented. For changes to recall:
 
-### Name + Link
+1. **Intent classification** is rule-based — no LLM calls. Modify keywords in `classify_intent()` (bilingual: Chinese + English).
+2. **Entity matching** uses `entity_overlap()` (Jaccard on `canonical_key_light`-normalized query entities vs concept's `related_entities_json`).
+3. **Semantic search** embeds query via `EmbeddingProvider`, searches `EmbeddingStore` for top-K.
+4. **Scoring** weights: `SEMANTIC_WEIGHT=0.6`, `ENTITY_WEIGHT=0.4`. `RecallScore` tracks both channels.
+5. **Token budget** is dynamic per `Intent`: `RecallBudget::for_intent(intent, max_tokens)`. `enforce_total_budget()` pops lowest-priority items.
+6. **RecallStats** are updated via `ConceptStore::update_recall_stats()` for top 3 concepts.
+7. **`MemoryContext.token_count`** reflects actual output tokens (estimated).
 
-1. 调用 LLM 生成概念名称和摘要
-2. 把 Observation 关联到 Candidate
-3. 合并同一 Candidate 下的 known_facts
+Key constants in `recall/mod.rs`:
+```rust
+const DEFAULT_MAX_TOKENS: usize = 1500;
+const SEMANTIC_WEIGHT: f64 = 0.6;
+const ENTITY_WEIGHT: f64 = 0.4;
+const SEMANTIC_TOP_K: usize = 10;
+const SEMANTIC_THRESHOLD: f32 = 0.0;
+```
 
-### Validate（D5 — 需要 pipeline 集成）
+For changes to recall that touch store traits:
+- `ConceptStore::find_by_entities()` — entity match
+- `ConceptStore::list_concepts()` — load candidates
+- `ConceptStore::update_recall_stats()` — post-recall updates
+- `EmbeddingStore::search()` — semantic search
+- `EmbeddingProvider::embed()` — query embedding
 
-1. 在 extract 后根据 source_type 调用 `BetaConfidence::update()`
-2. 后台 decay 任务扫描 long-inactive concepts
-3. 设计 auto-confirm / auto-demote 触发逻辑
+Priority order for `enforce_total_budget()`:
+1. `relevant_entities` (popped first)
+2. `task_state`
+3. `rejected_hypotheses`
+4. `user_preferences`
+5. `known_facts` (popped last)
+For changes to recall that touch store traits:
+- `ConceptStore::find_by_entities()` — entity match
+- `ConceptStore::list_concepts()` — load candidates
+- `EmbeddingStore::search()` — semantic search
+- `EmbeddingProvider::embed()` — query embedding
 
-### Promote
+## Growth Pipeline Checklist
 
-1. `ConceptCandidate.status` 必须先改为 `ConceptStatus`（D4）
-2. 实现 Candidate → Concept 的 promotion 逻辑
-3. 保留 Candidate 作为历史记录
+For changes to the growth pipeline:
 
-### Recall（D8）
+### Cluster Engine (P3-B)
 
-1. 实现语义搜索（依赖 embedding 实现）
-2. 实现 intent 分类（`Intent` 枚举已存在）
-3. `MemoryContext.token_count` 必须生效（截断逻辑）
-4. 实现 §13.4 的 token 预算分配
+- `ClusterEngine::cluster()` takes `Vec<ClusteredObservation>` + embeddings → `Vec<ObservationCluster>`.
+- `combined_distance()` blends entity Jaccard + embedding cosine.
+- Uses `linfa-clustering` for HAC. Threshold-based cut produces variable cluster count.
+- `cluster_to_candidate()` converts each cluster to a `ConceptCandidate`.
 
-### Feedback（D9）
+### Merge/Split Engine (P3-C)
 
-1. 新增 feedback 表
-2. 实现反馈分类（Confirm/Negate/Supplement/Correct/Preference）
-3. 反馈触发 confidence 更新
-4. 反馈生成 rejected_hypothesis
+- `MergeSplitEngine::merge_group()` merges overlapping candidates via Jaccard on entity sets.
+- `split_candidate()` splits heterogeneous candidates.
+- Union-Find for group detection. Both return `MergeResult` with candidates + stats.
+
+### Extraction Pipeline
+
+- `extract_observations()` → LLM call → `Vec<Observation>`.
+- `extract_and_dedup()` → extract + filter duplicates (normalized subject+predicate+object).
+- `reextract()` → P2-D: atomic supersede + re-extract + stamp prompt version.
+- Anti-hallucination gate: `evidence_is_supported()` checks verbatim substring match.
 
 ## Adding a New Domain Type
 
@@ -80,7 +114,7 @@ Checklist:
 ## Adding a New Provider
 
 1. New file in `llm/` or `embed/` for the implementation
-2. Implement the existing trait (`LlmProvider` or `EmbeddingService`)
+2. Implement the existing trait (`LlmProvider` or `EmbeddingProvider`)
 3. Add constructor with configuration from `config.rs`
 4. Add feature flag in `Cargo.toml` if dependency is heavy
 
@@ -103,7 +137,6 @@ Checklist:
 - [ ] Down migration not needed (append-only by convention)
 - [ ] Existing data preserved (ADD COLUMN, not ALTER COLUMN type)
 - [ ] Integration tests pass with fresh DB
-- [ ] 如果新增关联表，更新 design-reference.md 的 D1 状态
 
 ## Dependency Direction Check
 
@@ -113,16 +146,42 @@ Before adding any `use` statement:
 Allowed directions:
   CLI → Pipeline → Models
   CLI → Store → Models
-  Store → Models
-  Pipeline → LLM traits
+  Recall → Store (traits)
+  Recall → Embed (traits)
+  Recall → Models
+  Pipeline → LLM (trait)
+  Pipeline → Store (traits)
   Pipeline → Models
-  Pipeline → Service (entity, confidence)  ← 当前缺失的集成
-  Entity → Models
-  Confidence → (standalone)
+  Pipeline → Entity (pure function)
+  Pipeline → Confidence (pure function)
+  Store → Models
+  Entity → Models (pure)
+  Confidence → Models (pure)
+  Embed → Config (Settings)
 
 Forbidden:
   Models → anything (must be pure)
   Store → Pipeline
-  LLM traits → Store
-  Pipeline → Store (use traits as parameters)
+  LLM → Store
+  Pipeline → Store (concrete impls — use traits as params)
+  Embed → Store (use embed_and_store() free function)
 ```
+
+## Testing Strategy
+
+| Component | Test Type | Fixture |
+|-----------|-----------|---------|
+| Ingest (parser) | Unit tests in `pipeline/ingest.rs` | Raw strings |
+| Extract (LLM) | Unit + integration with `MockLlmProvider` | `memory-test-fixtures` |
+| Cluster | Unit tests in `pipeline/cluster.rs` | Synthetic observations |
+| Merge/Split | Unit tests in `pipeline/merge.rs` | Synthetic candidates |
+| Recall | Unit tests in `recall/mod.rs` | `StubEmbeddingService` + in-memory DB |
+| Store impls | Integration tests in `tests/integration_test.rs` | `Database::open_in_memory()` |
+| Confidence | Unit tests in `confidence/mod.rs` | Pure math |
+| Entity | Unit tests in `entity/mod.rs` | String inputs |
+
+Key patterns:
+- `MockLlmProvider`: Pattern-matched responses, call log via `Mutex<Vec<String>>`.
+- `StubEmbeddingService`: FNV-1a hash → deterministic vector. Same text → same vector. Network-free.
+- `Database::open_in_memory()`: Fresh SQLite per test. No shared state.
+- `#[tokio::test]` for async tests (extraction, embedding, recall).

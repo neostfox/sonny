@@ -7,4 +7,5 @@ pub mod observation;
 pub mod predicate;
 pub mod raw_memory;
 pub mod recall;
+pub mod relation;
 pub mod status;

@@ -18,6 +18,10 @@ const MIGRATIONS: &[(u32, &str)] = &[
         6,
         include_str!("../migrations/006_p3a_embedding_storage.sql"),
     ),
+    (
+        7,
+        include_str!("../migrations/007_p5a_concept_relation.sql"),
+    ),
 ];
 
 pub fn run_migrations(conn: &Connection) -> MemoryResult<()> {

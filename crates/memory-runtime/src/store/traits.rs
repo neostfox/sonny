@@ -1,8 +1,11 @@
+use crate::confidence::EvidenceType;
 use crate::error::MemoryResult;
 use crate::models::concept::{Concept, ConceptCandidate};
 use crate::models::embedding::EmbeddingSearchResult;
+use crate::models::hierarchy::RelationType;
 use crate::models::observation::Observation;
 use crate::models::raw_memory::RawMemory;
+use crate::models::relation::ConceptRelation;
 use crate::models::status::{CandidateStatus, ConceptStatus, ObservationStatus};
 
 pub trait RawMemoryStore: Send + Sync {
@@ -74,6 +77,35 @@ pub trait ConceptStore: Send + Sync {
         workspace_id: &str,
     ) -> MemoryResult<Vec<Concept>>;
     fn update_recall_stats(&self, concept_id: &str, success: bool) -> MemoryResult<()>;
+}
+
+pub trait RelationStore: Send + Sync {
+    /// P5-A: accumulate one piece of evidence on the edge (src, dst, type),
+    /// creating it at Beta(1, 1) if absent. Endpoint order is canonicalized for
+    /// symmetric relation types. A newly created edge bumps `connection_count`
+    /// on both endpoint concepts. Returns the updated edge.
+    fn record_evidence(
+        &self,
+        workspace_id: &str,
+        src_concept_id: &str,
+        dst_concept_id: &str,
+        relation_type: RelationType,
+        evidence: &EvidenceType,
+    ) -> MemoryResult<ConceptRelation>;
+    fn get_edge(
+        &self,
+        workspace_id: &str,
+        src_concept_id: &str,
+        dst_concept_id: &str,
+        relation_type: RelationType,
+    ) -> MemoryResult<Option<ConceptRelation>>;
+    /// All edges touching `concept_id`, either direction, strongest first.
+    fn neighbors(
+        &self,
+        workspace_id: &str,
+        concept_id: &str,
+    ) -> MemoryResult<Vec<ConceptRelation>>;
+    fn list_by_workspace(&self, workspace_id: &str) -> MemoryResult<Vec<ConceptRelation>>;
 }
 
 pub trait EmbeddingStore: Send + Sync {

@@ -1,0 +1,22 @@
+{
+  "gates": [
+    "cargo_check",
+    "cargo_test"
+  ],
+  "id": "p4c-time-decay",
+  "is_archived": false,
+  "is_held": false,
+  "last_event_seq": 6,
+  "objective": "P4-C 时间感知+衰减：Ebbinghaus recency 因子 exp(-λ_eff·Δt)，λ_eff=(1/half_life)/(1+0.5·successful_recall_count)，锚 last_recalled_at 回退 created_at，作为召回排序的乘性因子（不碰 α/β）；验收=长期未召回概念降权",
+  "phase": "review",
+  "read_scope": [
+    "crates/memory-runtime/src"
+  ],
+  "risk_triggers": [],
+  "schema": "control.task-view.v1",
+  "write_allow": [
+    "crates/memory-runtime/src/models/recall.rs",
+    "crates/memory-runtime/src/recall"
+  ],
+  "write_deny": []
+}

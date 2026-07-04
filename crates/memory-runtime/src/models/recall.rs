@@ -72,9 +72,13 @@ impl MemoryContext {
 #[derive(Debug, Clone)]
 pub struct RecallScore {
     pub concept_id: String,
+    /// Final ranking score: `(semantic·w_s + entity·w_e) · recency`.
     pub score: f64,
     pub semantic_score: f64,
     pub entity_score: f64,
+    /// P4-C: Ebbinghaus recency factor in (0, 1], multiplicative on the channel
+    /// score. Salience only — never persisted, never touches evidence α/β.
+    pub recency: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

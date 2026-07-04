@@ -1,5 +1,7 @@
 use std::collections::{BTreeSet, HashMap};
 
+use chrono::{DateTime, Utc};
+
 use crate::embed::traits::EmbeddingProvider;
 use crate::entity::canonical_key_light;
 use crate::error::MemoryResult;
@@ -14,6 +16,10 @@ const SEMANTIC_WEIGHT: f64 = 0.6;
 const ENTITY_WEIGHT: f64 = 0.4;
 const SEMANTIC_TOP_K: usize = 10;
 const SEMANTIC_THRESHOLD: f32 = 0.0;
+/// P4-C: base forgetting half-life (mirrors `ConfidenceConfig::decay_half_life_days`).
+const DEFAULT_DECAY_HALF_LIFE_DAYS: f64 = 90.0;
+/// P4-C: each successful recall slows forgetting by this factor (spacing effect).
+const REHEARSAL_DECELERATION: f64 = 0.5;
 
 pub struct RecallEngine<'a, C, E, P>
 where
@@ -24,6 +30,7 @@ where
     concepts: &'a C,
     embeddings: &'a E,
     provider: &'a P,
+    decay_half_life_days: f64,
 }
 
 impl<'a, C, E, P> RecallEngine<'a, C, E, P>
@@ -37,7 +44,15 @@ where
             concepts,
             embeddings,
             provider,
+            decay_half_life_days: DEFAULT_DECAY_HALF_LIFE_DAYS,
         }
+    }
+
+    /// Override the base forgetting half-life (wire from
+    /// `ConfidenceConfig::decay_half_life_days` when constructing from settings).
+    pub fn with_decay_half_life(mut self, days: f64) -> Self {
+        self.decay_half_life_days = days;
+        self
     }
 
     pub async fn recall(&self, query: &str, workspace_id: &str) -> MemoryResult<MemoryContext> {
@@ -85,6 +100,7 @@ where
                         score: 0.0,
                         semantic_score: 0.0,
                         entity_score: 0.0,
+                        recency: 1.0,
                     });
                     entry.semantic_score = entry.semantic_score.max(hit.score);
                 }
@@ -105,19 +121,27 @@ where
                         score: 0.0,
                         semantic_score: 0.0,
                         entity_score: 0.0,
+                        recency: 1.0,
                     });
                 entry.entity_score = entry.entity_score.max(overlap);
             }
         }
 
-        let mut ranked: Vec<_> = scores
-            .into_values()
-            .map(|mut score| {
-                score.score =
-                    score.semantic_score * SEMANTIC_WEIGHT + score.entity_score * ENTITY_WEIGHT;
-                score
-            })
-            .collect();
+        // P4-C: recency is a multiplicative salience factor on the channel
+        // score. It reads recall stats written AFTER ranking (rehearsal resets
+        // the forgetting clock for the NEXT recall) and never touches α/β.
+        let now = Utc::now();
+        let mut ranked = Vec::with_capacity(scores.len());
+        for mut score in scores.into_values() {
+            score.recency = match self.concepts.get_concept(&score.concept_id)? {
+                Some(concept) => concept_recency(&concept, self.decay_half_life_days, now),
+                None => 1.0,
+            };
+            score.score = (score.semantic_score * SEMANTIC_WEIGHT
+                + score.entity_score * ENTITY_WEIGHT)
+                * score.recency;
+            ranked.push(score);
+        }
         ranked.sort_by(|a, b| b.score.total_cmp(&a.score));
         Ok(ranked)
     }
@@ -131,6 +155,47 @@ where
         }
         Ok(concepts)
     }
+}
+
+/// P4-C: Ebbinghaus forgetting curve with rehearsal (spacing) effect.
+///
+/// `recency = exp(−λ_eff·Δt)` where
+/// `λ_eff = (1 / half_life_days) / (1 + REHEARSAL_DECELERATION · successful_recall_count)`
+/// and Δt is days since `anchor` (clamped at 0 for future timestamps).
+///
+/// Opaque or missing anchors yield 1.0 — legacy rows without parseable
+/// timestamps are not penalized, they just don't decay.
+pub fn recency_factor(
+    anchor: Option<&str>,
+    successful_recall_count: i64,
+    half_life_days: f64,
+    now: DateTime<Utc>,
+) -> f64 {
+    if half_life_days <= 0.0 {
+        return 1.0;
+    }
+    let Some(parsed) = anchor.and_then(|a| DateTime::parse_from_rfc3339(a).ok()) else {
+        return 1.0;
+    };
+    let days = (now - parsed.with_timezone(&Utc)).num_seconds().max(0) as f64 / 86_400.0;
+    let lambda_eff = (1.0 / half_life_days)
+        / (1.0 + REHEARSAL_DECELERATION * successful_recall_count.max(0) as f64);
+    (-lambda_eff * days).exp()
+}
+
+/// Recency anchored on `last_recalled_at` (rehearsal resets the forgetting
+/// clock), falling back to `created_at` for never-recalled concepts.
+fn concept_recency(concept: &Concept, half_life_days: f64, now: DateTime<Utc>) -> f64 {
+    let anchor = concept
+        .last_recalled_at
+        .as_deref()
+        .unwrap_or(concept.created_at.as_str());
+    recency_factor(
+        Some(anchor),
+        concept.successful_recall_count,
+        half_life_days,
+        now,
+    )
 }
 
 pub fn classify_intent(query: &str) -> Intent {
@@ -554,6 +619,77 @@ mod tests {
 
         assert!(context.known_facts.len() > context.task_state.len());
         assert!(context.token_count <= 250);
+    }
+
+    #[test]
+    fn recency_factor_follows_ebbinghaus_with_rehearsal() {
+        let now = DateTime::parse_from_rfc3339("2026-07-04T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        // Fresh anchor → no decay.
+        assert!((recency_factor(Some("2026-07-04T00:00:00Z"), 0, 90.0, now) - 1.0).abs() < 1e-9);
+        // 90 days elapsed, never successfully recalled → e^-1.
+        let stale = recency_factor(Some("2026-04-05T00:00:00Z"), 0, 90.0, now);
+        assert!((stale - (-1.0f64).exp()).abs() < 1e-6);
+        // Rehearsal slows forgetting: 2 successful recalls halve λ → e^-0.5.
+        let rehearsed = recency_factor(Some("2026-04-05T00:00:00Z"), 2, 90.0, now);
+        assert!((rehearsed - (-0.5f64).exp()).abs() < 1e-6);
+        assert!(rehearsed > stale);
+    }
+
+    #[test]
+    fn recency_factor_tolerates_opaque_or_missing_anchor() {
+        let now = Utc::now();
+        // Legacy fixtures carry opaque timestamps — no penalty, no decay.
+        assert_eq!(recency_factor(Some("t0"), 0, 90.0, now), 1.0);
+        assert_eq!(recency_factor(None, 0, 90.0, now), 1.0);
+        // Degenerate half-life disables decay instead of dividing by zero.
+        assert_eq!(recency_factor(Some("2026-01-01T00:00:00Z"), 0, 0.0, now), 1.0);
+        // Future anchors clamp to zero elapsed time.
+        let future = (now + chrono::Duration::days(30)).to_rfc3339();
+        assert_eq!(recency_factor(Some(&future), 0, 90.0, now), 1.0);
+    }
+
+    #[tokio::test]
+    async fn rank_downranks_long_unrecalled_concepts() {
+        let db = Database::open_in_memory().unwrap();
+        let concept_store = SqliteConceptStore::new(db.conn.clone());
+        let embedding_store = SqliteEmbeddingStore::new(db.conn.clone());
+        let embedding = StaticEmbedding;
+        let now = Utc::now();
+
+        // Identical semantic signal; only the forgetting clock differs.
+        let mut fresh = concept("c-fresh", "POSMASK-fresh", &["e-fresh"]);
+        fresh.created_at = now.to_rfc3339();
+        let mut stale = concept("c-stale", "POSMASK-stale", &["e-stale"]);
+        stale.created_at = (now - chrono::Duration::days(300)).to_rfc3339();
+        let mut rehearsed = concept("c-rehearsed", "POSMASK-rehearsed", &["e-rehearsed"]);
+        rehearsed.created_at = (now - chrono::Duration::days(300)).to_rfc3339();
+        rehearsed.last_recalled_at = Some((now - chrono::Duration::days(1)).to_rfc3339());
+
+        for c in [&fresh, &stale, &rehearsed] {
+            concept_store.insert_concept(c).unwrap();
+            embedding_store
+                .store_embedding("concept", &c.concept_id, "ws", &c.name, &[1.0, 0.0])
+                .unwrap();
+        }
+
+        let engine = RecallEngine::new(&concept_store, &embedding_store, &embedding);
+        let ranked = engine.rank("explain POSMASK", "ws").await.unwrap();
+
+        assert_eq!(ranked.len(), 3);
+        // The 300-day-stale concept sinks to the bottom; a recent recall
+        // (rehearsal) rescues an equally old concept.
+        assert_eq!(ranked[2].concept_id, "c-stale");
+        assert!(ranked[2].recency < 0.1);
+        let fresh_score = ranked.iter().find(|s| s.concept_id == "c-fresh").unwrap();
+        let rehearsed_score = ranked
+            .iter()
+            .find(|s| s.concept_id == "c-rehearsed")
+            .unwrap();
+        assert!(fresh_score.recency > 0.95);
+        assert!(rehearsed_score.recency > 0.95);
+        assert!(fresh_score.score > ranked[2].score);
     }
 
     #[test]

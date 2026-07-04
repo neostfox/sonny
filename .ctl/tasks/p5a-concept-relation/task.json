@@ -4,11 +4,11 @@
     "cargo_test"
   ],
   "id": "p5a-concept-relation",
-  "is_archived": false,
+  "is_archived": true,
   "is_held": false,
-  "last_event_seq": 10,
+  "last_event_seq": 15,
   "objective": "概念关系边表：migration 007 建 concept_relation（有向因果边+对称关联边），边级 Beta 证据更新与生命周期（candidate/validated/confirmed），LinkEngine 从 causes 观测/共享实体/coclaim 批次回填边并维护 connection_count",
-  "phase": "review",
+  "phase": "completed",
   "read_scope": [
     "crates/memory-runtime/src"
   ],

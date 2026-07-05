@@ -267,6 +267,7 @@ gantt
 | 文件 | `feedback/mod.rs`（从 stub 变为真实实现），新 migration，`pipeline/` 新文件 |
 | 验收 | 用户说"不对" → 对应 observation confidence 下降 + rejected_hypothesis 生成 |
 | 依赖 | P3-D（confidence 集成）, P4-A（recall 产出 context 供用户反馈） |
+| 状态 | ✅ 已实现 — feedback 表 + 账本、关键词分类（双语）、revision 权重、Negate→rejected_hypothesis + observation β↑、Correct→单条 supersede（P2-D 机制）、Supplement→实体合并、Preference→概念定型；**闭环**：recall 只记 attempt（`record_recall`），成功/失败由显式反馈经 `record_recall_outcome` 判定（修复 P4-C 审计的 rehearsal 正反馈缺陷）。实现落在 `feedback/`+`store/feedback_store.rs`，未新增 `pipeline/` 文件（分类无需 LLM） |
 
 ### P4-C: 时间感知 + 衰减
 

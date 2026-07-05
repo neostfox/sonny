@@ -71,10 +71,12 @@ where
         let concepts = self.load_ranked_concepts(&ranked)?;
         let mut context = build_context(workspace_id, &intent, &concepts, max_tokens);
 
+        // P4-B closed loop: retrieval records only the attempt (count + clock).
+        // Whether it was *successful* is decided later by explicit feedback via
+        // `record_recall_outcome` — retrieval alone must not slow time decay.
         if context.current_concept.is_some() {
             for concept in concepts.iter().take(3) {
-                self.concepts
-                    .update_recall_stats(&concept.concept_id, true)?;
+                self.concepts.record_recall(&concept.concept_id)?;
             }
         }
 
@@ -601,9 +603,12 @@ mod tests {
         assert!(context.token_count <= 180);
         assert!(!context.known_facts.is_empty());
 
+        // P4-B: retrieval bumps only the attempt counter; success arrives via
+        // explicit feedback, never from the retrieval itself.
         let recalled = concept_store.get_concept("c-posmask").unwrap().unwrap();
         assert_eq!(recalled.recall_count, 1);
-        assert_eq!(recalled.successful_recall_count, 1);
+        assert_eq!(recalled.successful_recall_count, 0);
+        assert!(recalled.last_recalled_at.is_some());
     }
 
     #[test]

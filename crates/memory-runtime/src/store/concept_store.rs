@@ -235,17 +235,38 @@ impl ConceptStore for SqliteConceptStore {
         map_rows(&conn, &sql, params, row_to_concept)
     }
 
-    fn update_recall_stats(&self, concept_id: &str, success: bool) -> MemoryResult<()> {
+    fn record_recall(&self, concept_id: &str) -> MemoryResult<()> {
+        let conn = self.conn.lock();
+        let now = chrono::Utc::now().to_rfc3339();
+        let changed = conn.execute(
+            "UPDATE concept SET last_recalled_at = ?1, recall_count = recall_count + 1, updated_at = ?1 WHERE concept_id = ?2",
+            params![&now, concept_id],
+        )?;
+        require_concept_row(changed, concept_id)
+    }
+
+    fn record_recall_outcome(&self, concept_id: &str, success: bool) -> MemoryResult<()> {
         let conn = self.conn.lock();
         let now = chrono::Utc::now().to_rfc3339();
         let sql = if success {
-            "UPDATE concept SET last_recalled_at = ?1, recall_count = recall_count + 1, successful_recall_count = successful_recall_count + 1, updated_at = ?1 WHERE concept_id = ?2"
+            "UPDATE concept SET successful_recall_count = successful_recall_count + 1, updated_at = ?1 WHERE concept_id = ?2"
         } else {
-            "UPDATE concept SET last_recalled_at = ?1, recall_count = recall_count + 1, failed_recall_count = failed_recall_count + 1, updated_at = ?1 WHERE concept_id = ?2"
+            "UPDATE concept SET failed_recall_count = failed_recall_count + 1, updated_at = ?1 WHERE concept_id = ?2"
         };
-        conn.execute(sql, params![&now, concept_id])?;
-        Ok(())
+        let changed = conn.execute(sql, params![&now, concept_id])?;
+        require_concept_row(changed, concept_id)
     }
+}
+
+/// H4 (quality-guidelines): recall-stat updates must not silently succeed on a
+/// non-existent concept_id.
+fn require_concept_row(changed: usize, concept_id: &str) -> MemoryResult<()> {
+    if changed == 0 {
+        return Err(crate::error::MemoryError::ConceptNotFound {
+            concept_id: concept_id.to_string(),
+        });
+    }
+    Ok(())
 }
 
 fn map_rows<T, P, F>(conn: &Connection, sql: &str, params: P, map: F) -> MemoryResult<Vec<T>>

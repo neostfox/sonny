@@ -483,6 +483,10 @@ mod tests {
             Ok(Vec::new())
         }
 
+        fn supersede(&self, _observation_id: &str, _superseded_by: &str) -> MemoryResult<()> {
+            unreachable!()
+        }
+
         fn find_duplicate(
             &self,
             _subject: &str,

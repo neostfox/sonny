@@ -609,3 +609,144 @@ fn test_find_coclaim_excludes_dead_statuses() {
         "superseded siblings must be filtered from find_coclaim"
     );
 }
+
+/// P4-B acceptance (roadmap): the user says "不对" → the observation's confidence
+/// drops and a rejected_hypothesis is generated — and the recall loop is closed:
+/// retrieval records only the attempt, explicit feedback decides success/failure,
+/// and the next recall surfaces the rejection.
+#[tokio::test]
+async fn test_p4b_feedback_closes_recall_loop() {
+    use memory_runtime::feedback::FeedbackEngine;
+    use memory_runtime::models::concept::Concept;
+    use memory_runtime::models::feedback::FeedbackType;
+    use memory_runtime::models::status::ConceptStatus;
+    use memory_runtime::recall::RecallEngine;
+    use memory_runtime::store::concept_store::SqliteConceptStore;
+    use memory_runtime::store::feedback_store::SqliteFeedbackStore;
+    use memory_runtime::store::traits::{ConceptStore, FeedbackStore};
+
+    let db = Database::open_in_memory().unwrap();
+    let concept_store = SqliteConceptStore::new(db.conn.clone());
+    let obs_store = SqliteObservationStore::new(db.conn.clone());
+    let feedback_store = SqliteFeedbackStore::new(db.conn.clone());
+    let emb_store = SqliteEmbeddingStore::new(db.conn.clone());
+    let emb = StubEmbeddingService::new(64);
+
+    // Observations reference raw_memory(memory_id); seed the parent row.
+    let mut raw = make_test_raw_memory("ws", "s1", "user", "POSMASK 有机器字段");
+    raw.memory_id = "m1".to_string();
+    {
+        let conn = db.conn.lock();
+        seed_raw_memories(&conn, std::slice::from_ref(&raw));
+    }
+
+    // A believed-in concept (Beta(4,1) = 0.8) claiming POSMASK has a machine field,
+    // backed by one observation.
+    concept_store
+        .insert_concept(&Concept {
+            concept_id: "c-posmask".to_string(),
+            workspace_id: "ws".to_string(),
+            name: "POSMASK".to_string(),
+            concept_type: None,
+            definition: Some("POSMASK 表结构".to_string()),
+            related_entities_json: Some(r#"["posmask", "机器字段"]"#.to_string()),
+            known_facts_json: Some(r#"["POSMASK 有机器字段"]"#.to_string()),
+            rejected_hypotheses_json: None,
+            open_questions_json: None,
+            evidence_json: None,
+            confidence: 0.8,
+            evidence_alpha: 4.0,
+            evidence_beta: 1.0,
+            status: ConceptStatus::Active,
+            parent_concept_id: None,
+            hierarchy_depth: 0,
+            last_recalled_at: None,
+            recall_count: 0,
+            successful_recall_count: 0,
+            failed_recall_count: 0,
+            connection_count: 0,
+            created_at: chrono::Utc::now().to_rfc3339(),
+            updated_at: chrono::Utc::now().to_rfc3339(),
+        })
+        .unwrap();
+    let obs = Observation {
+        observation_id: "o-machine-field".to_string(),
+        workspace_id: "ws".to_string(),
+        memory_id: "m1".to_string(),
+        subject_text: "POSMASK".to_string(),
+        subject_type: None,
+        predicate: "has_field".to_string(),
+        object_text: Some("机器字段".to_string()),
+        object_type: None,
+        evidence_text: None,
+        extraction_confidence: 0.7,
+        evidence_alpha: 2.0,
+        evidence_beta: 1.0,
+        status: ObservationStatus::Candidate,
+        surprise_score: 0.5,
+        source_type: ObservationSourceType::UserMessage,
+        consolidated: false,
+        memory_type_candidate: None,
+        observation_detail_json: None,
+        extraction_batch_id: None,
+        superseded_by: None,
+        created_at: chrono::Utc::now().to_rfc3339(),
+    };
+    obs_store.insert(&obs).unwrap();
+
+    // --- Recall: the attempt is recorded, but success is NOT presumed. ---
+    let recall_engine = RecallEngine::new(&concept_store, &emb_store, &emb);
+    let context = recall_engine
+        .recall("确认 POSMASK 有没有 机器字段", "ws")
+        .await
+        .unwrap();
+    assert_eq!(context.current_concept.as_deref(), Some("POSMASK"));
+    let after_recall = concept_store.get_concept("c-posmask").unwrap().unwrap();
+    assert_eq!(after_recall.recall_count, 1);
+    assert_eq!(after_recall.successful_recall_count, 0);
+    assert_eq!(after_recall.failed_recall_count, 0);
+
+    // --- The user pushes back: "不对" targeting the observation. ---
+    let feedback_engine = FeedbackEngine::new(&concept_store, &obs_store, &feedback_store);
+    let result = feedback_engine
+        .apply_feedback(
+            "ws",
+            "c-posmask",
+            "不对，POSMASK 没有机器字段",
+            Some("o-machine-field"),
+        )
+        .unwrap();
+    assert_eq!(result.feedback_type, FeedbackType::Negate);
+
+    // Observation confidence drops (roadmap acceptance).
+    let negated = obs_store.get("o-machine-field").unwrap().unwrap();
+    assert_eq!(negated.evidence_beta, 4.0);
+    assert!(negated.fact_confidence() < obs.fact_confidence());
+
+    // Concept absorbs the negation (Beta(4,4) = 0.5, still Active) and the
+    // recall is resolved as FAILED — rehearsal must not slow its decay.
+    let after_feedback = concept_store.get_concept("c-posmask").unwrap().unwrap();
+    assert!((after_feedback.confidence - 0.5).abs() < 1e-9);
+    assert_eq!(after_feedback.status, ConceptStatus::Active);
+    assert_eq!(after_feedback.failed_recall_count, 1);
+    assert_eq!(after_feedback.successful_recall_count, 0);
+
+    // The event is on the ledger.
+    let ledger = feedback_store.list_by_concept("ws", "c-posmask").unwrap();
+    assert_eq!(ledger.len(), 1);
+    assert_eq!(ledger[0].beta_delta, 3.0);
+    assert_eq!(
+        ledger[0].observation_id.as_deref(),
+        Some("o-machine-field")
+    );
+
+    // --- The next recall carries the rejection back to the caller. ---
+    let context = recall_engine
+        .recall("确认 POSMASK 有没有 机器字段", "ws")
+        .await
+        .unwrap();
+    assert!(context
+        .rejected_hypotheses
+        .iter()
+        .any(|h| h.contains("没有机器字段")));
+}

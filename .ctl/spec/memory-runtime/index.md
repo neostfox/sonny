@@ -30,8 +30,8 @@ Spec documents for the Memory Runtime system — a concept-growth-based long-ter
 | P3-B (Cluster Engine) | ✅ Complete | HAC clustering, combined distance, entity+embedding |
 | P3-C (Merge/Split) | ✅ Complete | Candidate merging, Jaccard similarity, Union-Find |
 | P4-A (Recall Engine) | ✅ Complete | Intent classification, entity match, semantic search, token budget, recall stats |
-| P4-B (Feedback) | ⏳ Planned | Model exists, no table/implementation |
-| P4-C (Time Awareness) | ⏳ Planned | Not started |
+| P4-B (Feedback) | ✅ Complete | feedback table + ledger, keyword classification, revision weights, Negate→rejected_hypothesis, Correct→supersede, closed recall loop (outcome from explicit feedback) |
+| P4-C (Time Awareness) | ✅ Complete | Ebbinghaus decay + rehearsal deceleration, last_recalled_at anchor, recency salience factor |
 
 ## Quick Reference
 

@@ -124,6 +124,24 @@ impl ObservationStore for SqliteObservationStore {
         Ok(())
     }
 
+    fn supersede(&self, observation_id: &str, superseded_by: &str) -> MemoryResult<()> {
+        let conn = self.conn.lock();
+        let changed = conn.execute(
+            "UPDATE observation SET status = ?1, superseded_by = ?2 WHERE observation_id = ?3",
+            params![
+                ObservationStatus::Superseded.as_str(),
+                superseded_by,
+                observation_id
+            ],
+        )?;
+        if changed == 0 {
+            return Err(crate::error::MemoryError::ObservationNotFound {
+                observation_id: observation_id.to_string(),
+            });
+        }
+        Ok(())
+    }
+
     fn update_confidence(&self, observation_id: &str, alpha: f64, beta: f64) -> MemoryResult<()> {
         let conn = self.conn.lock();
         let changed = conn.execute(

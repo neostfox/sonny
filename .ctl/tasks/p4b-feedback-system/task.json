@@ -6,22 +6,22 @@
   "id": "p4b-feedback-system",
   "is_archived": false,
   "is_held": false,
-  "last_event_seq": 1,
-  "objective": "Feedback 系统：新增 feedback 表，反馈分类 Confirm/Negate/Supplement/Correct，触发 confidence 更新和 rejected_hypothesis 生成",
-  "phase": "planning",
+  "last_event_seq": 7,
+  "objective": "P4-B Feedback 反馈闭环：feedback 表 + Confirm/Negate/Supplement/Correct/Preference 分类 + concept/observation confidence 更新 + Negate→rejected_hypothesis + Correct→P2-D supersede；recall 只计 recall_count，成功/失败由显式反馈驱动（关闭 rehearsal 正反馈）",
+  "phase": "review",
   "read_scope": [
-    "crates/memory-runtime/src/confidence/mod.rs",
-    "crates/memory-runtime/src/feedback",
-    "crates/memory-runtime/src/migrations",
-    "crates/memory-runtime/src/models/feedback.rs",
-    "crates/memory-runtime/src/store"
+    ".ctl/spec/memory-runtime",
+    "crates/memory-runtime/src"
   ],
   "risk_triggers": [],
   "schema": "control.task-view.v1",
   "write_allow": [
     "crates/memory-runtime/src/feedback",
     "crates/memory-runtime/src/migrations",
-    "crates/memory-runtime/src/store"
+    "crates/memory-runtime/src/models/feedback.rs",
+    "crates/memory-runtime/src/recall",
+    "crates/memory-runtime/src/store",
+    "crates/memory-runtime/tests"
   ],
   "write_deny": []
 }

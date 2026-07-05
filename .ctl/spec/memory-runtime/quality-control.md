@@ -141,7 +141,7 @@ Decay models how **salient** a concept is at recall time — not how **true** it
 recency = exp(−λ_eff · Δt)                               // ∈ (0, 1]
 ```
 
-- Successful recall **resets the forgetting clock** (`last_recalled_at` is updated by `update_recall_stats`) **and** slows the decay rate for the future (rehearsal/strengthening). This is the spacing effect.
+- Recall **resets the forgetting clock** (`last_recalled_at`, via `record_recall`), but only a recall the user *validated* slows future decay: `successful_recall_count` is incremented by `record_recall_outcome(true)` from explicit positive feedback (P4-B), never by retrieval itself. This is the spacing effect without the rehearsal positive-feedback defect (a hot-but-wrong concept no longer strengthens just by being retrieved).
 - Never-recalled concepts anchor Δt to `created_at`; combined with the `success_rate = 0.5` prior in vitality, a brand-new concept starts near the middle and ages out if never touched.
 - Config knob: `ConfidenceConfig.decay_half_life_days` (default 90.0) sets `λ_base = 1 / decay_half_life_days`.
 
@@ -149,7 +149,7 @@ recency = exp(−λ_eff · Δt)                               // ∈ (0, 1]
 
 - **Recall ranking**: `time_decay` is one factor in `compute_vitality`, applied live to every candidate concept.
 - **Consolidation**: a periodic consolidation pass evaluates vitality for auto promote/demote. It does **not** mutate α/β; it only transitions status based on the vitality thresholds above.
-- **`last_recalled_at` update**: every recall (`update_recall_stats(success)`) refreshes the anchor, so an active concept never decays.
+- **`last_recalled_at` update**: every recall attempt (`record_recall`) refreshes the anchor, so an active concept never decays; success/failure counters move only on explicit feedback (`record_recall_outcome`).
 
 ## Cross-Session Consistency
 

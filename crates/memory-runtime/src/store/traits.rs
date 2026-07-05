@@ -2,6 +2,7 @@ use crate::confidence::EvidenceType;
 use crate::error::MemoryResult;
 use crate::models::concept::{Concept, ConceptCandidate};
 use crate::models::embedding::EmbeddingSearchResult;
+use crate::models::feedback::Feedback;
 use crate::models::hierarchy::RelationType;
 use crate::models::observation::Observation;
 use crate::models::raw_memory::RawMemory;
@@ -53,6 +54,10 @@ pub trait ObservationStore: Send + Sync {
         session_id: &str,
         new_observations: &[Observation],
     ) -> MemoryResult<usize>;
+    /// P4-B: supersede a single observation (Correct feedback), pointing it at its
+    /// replacement. The row is retained with `status = Superseded` for traceability,
+    /// mirroring the P2-D session-level mechanism.
+    fn supersede(&self, observation_id: &str, superseded_by: &str) -> MemoryResult<()>;
 }
 
 pub trait ConceptStore: Send + Sync {
@@ -76,7 +81,15 @@ pub trait ConceptStore: Send + Sync {
         entities: &[String],
         workspace_id: &str,
     ) -> MemoryResult<Vec<Concept>>;
-    fn update_recall_stats(&self, concept_id: &str, success: bool) -> MemoryResult<()>;
+    /// P4-B: record a recall *attempt* — bumps `recall_count` and resets the
+    /// forgetting clock (`last_recalled_at`). Success/failure is deliberately NOT
+    /// decided here; it arrives later via explicit feedback
+    /// ([`Self::record_recall_outcome`]), closing the rehearsal loop.
+    fn record_recall(&self, concept_id: &str) -> MemoryResult<()>;
+    /// P4-B: resolve a prior recall attempt from explicit user feedback —
+    /// bumps `successful_recall_count` (slows time decay) or
+    /// `failed_recall_count`. Does not touch `recall_count` or the clock.
+    fn record_recall_outcome(&self, concept_id: &str, success: bool) -> MemoryResult<()>;
 }
 
 pub trait RelationStore: Send + Sync {
@@ -106,6 +119,14 @@ pub trait RelationStore: Send + Sync {
         concept_id: &str,
     ) -> MemoryResult<Vec<ConceptRelation>>;
     fn list_by_workspace(&self, workspace_id: &str) -> MemoryResult<Vec<ConceptRelation>>;
+}
+
+/// P4-B: append-only ledger of user feedback events.
+pub trait FeedbackStore: Send + Sync {
+    fn insert(&self, feedback: &Feedback) -> MemoryResult<()>;
+    /// Feedback history for one concept, oldest first.
+    fn list_by_concept(&self, workspace_id: &str, concept_id: &str)
+        -> MemoryResult<Vec<Feedback>>;
 }
 
 pub trait EmbeddingStore: Send + Sync {

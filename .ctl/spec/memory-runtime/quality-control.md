@@ -84,10 +84,14 @@ fn compute_vitality(concept: &Concept) -> f64 {
     // 1. Bayesian fact confidence
     let bayesian = concept.evidence_alpha / (concept.evidence_alpha + concept.evidence_beta);
 
-    // 2. Recall success rate (0.5 prior when never recalled)
-    let success_rate = if concept.recall_count > 0 {
-        concept.successful_recall_count as f64 / concept.recall_count as f64
-    } else { 0.5 };
+    // 2. Recall success rate over RESOLVED attempts only (P4-B closed loop).
+    //    Denominator is successful + failed, NOT recall_count: an un-reacted-to
+    //    recall is neutral, not a failure — retrieval alone is never signal.
+    //    Laplace smoothing (s+1)/(s+f+2) keeps low-sample concepts near the 0.5
+    //    prior and subsumes the never-recalled case (0 resolved → 1/2).
+    let resolved = concept.successful_recall_count + concept.failed_recall_count;
+    let success_rate =
+        (concept.successful_recall_count as f64 + 1.0) / (resolved as f64 + 2.0);
 
     // 3. Source diversity (5-session cap)
     let diversity = (concept.unique_session_count as f64 / 5.0).min(1.0);
@@ -107,6 +111,22 @@ fn compute_vitality(concept: &Concept) -> f64 {
     0.15 * time_decay + 0.10 * connectivity
 }
 ```
+
+**Decision — `success_rate` counts resolved attempts, silence is neutral** (P4-B
+audit F3): once recall records only the *attempt* (`record_recall`) and
+success/failure arrives solely from explicit feedback (`record_recall_outcome`),
+a `successful / recall_count` denominator would read every un-reacted-to recall
+as a failure — a concept recalled 10× with 2 confirms and 8 silences would score
+0.2 despite never being contradicted. The denominator is therefore
+`successful + failed` (resolved attempts), Laplace-smoothed so a single data
+point can't swing the score to 0 or 1. `recall_count` remains an activity tally
+and the recency anchor; it no longer feeds `success_rate`.
+
+**Rejected alternative** — timeout implicit resolution (silent survival auto-counts
+as a weak success after a window): it reintroduces the exact rehearsal
+positive-feedback the P4-B audit flagged — a hot-but-never-corrected wrong
+concept strengthens itself by being retrieved — and needs a timer/consolidation
+sweep to fire. Silence is absence of evidence, not evidence of correctness.
 
 ### Vitality Thresholds
 
@@ -249,8 +269,11 @@ fn reconsolidate(concept: &mut Concept) -> Result<(), MemoryError> {
         apply_corrections(concept)?;
         concept.evidence_alpha += 0.3; // reward for successful correction integration
     } else {
-        concept.successful_recall_count += 1;
-        concept.evidence_alpha += 0.1; // retrieval practice effect
+        // Silent survival is NOT a validated recall (P4-B): it does not touch
+        // successful_recall_count, so it neither feeds success_rate nor slows
+        // decay. It still adds a whisper of retrieval-practice evidence (α).
+        // OPEN QUESTION: whether silence should add α at all — see note below.
+        concept.evidence_alpha += 0.1; // retrieval-practice evidence, not a success tally
     }
 
     concept.status = ConceptStatus::Active;
@@ -259,7 +282,9 @@ fn reconsolidate(concept: &mut Concept) -> Result<(), MemoryError> {
 }
 ```
 
-Note: `evidence_alpha += 0.1` on successful recall is a *retrieval-practice* evidence signal (genuinely strengthens the fact), distinct from the *recency* salience factor. The two coexist: successful recall both adds weak evidence (α) and resets the decay clock (`last_recalled_at`).
+Note: `evidence_alpha += 0.1` on silent survival is a *retrieval-practice* evidence signal (weakly strengthens the fact), distinct from both the *recency* salience factor and the *success tally*. It does **not** increment `successful_recall_count` — silent survival is not a validated recall, so it never feeds `success_rate` or the decay-deceleration term.
+
+> **Open question (P4-B follow-up)**: should silent survival add α at all? `α += 0.1` on silence is the weakest remaining form of "retrieval strengthens without validation" — the same family as the rehearsal positive-feedback the P4-B audit removed elsewhere. It is kept here for now because the Labile window is an explicit correction opportunity (surviving it is a mild signal), but making it fully neutral is a defensible alternative. Decide before the consolidation pass is built.
 
 ### Labile Window Behavior
 
@@ -269,9 +294,9 @@ Note: `evidence_alpha += 0.1` on successful recall is a *retrieval-practice* evi
 | User corrects | Apply correction, re-consolidate | alpha += 0.3, apply fix, status → active |
 | User supplements | Add entities, re-consolidate | alpha += 0.5, extend concept, status → active |
 | User negates | Create rejected_hypothesis, re-consolidate | beta += 3.0, status → active |
-| Timeout (1h) | Auto re-consolidate | alpha += 0.1 (successful implicit recall), status → active |
+| Timeout (1h) | Auto re-consolidate | alpha += 0.1 (retrieval-practice evidence; **not** a successful recall), status → active |
 
-**Why**: In the brain, recalled memories are rebuilt each time. This creates a natural window for correction. If the concept survives recall without correction, the successful retrieval strengthens it slightly (retrieval practice effect).
+**Why**: In the brain, recalled memories are rebuilt each time. This creates a natural window for correction. If the concept survives recall without correction, it earns a whisper of retrieval-practice evidence (α += 0.1) — but silence is not validation, so it does **not** count as a successful recall (`successful_recall_count` unchanged) and does not slow decay. Only explicit positive feedback does that (P4-B closed loop).
 
 ## Feedback-Driven Revision
 

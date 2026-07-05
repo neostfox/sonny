@@ -298,9 +298,11 @@ Assess concept quality using the multi-dimensional vitality model. Full definiti
 ```rust
 fn compute_vitality(concept: &Concept) -> f64 {
     let bayesian = concept.evidence_alpha / (concept.evidence_alpha + concept.evidence_beta);
-    let success_rate = if concept.recall_count > 0 {
-        concept.successful_recall_count as f64 / concept.recall_count as f64
-    } else { 0.5 };
+    // success_rate over RESOLVED attempts only, Laplace-smoothed (P4-B F3):
+    // silence is neutral, never a failure. See quality-control.md §Concept Vitality.
+    let resolved = concept.successful_recall_count + concept.failed_recall_count;
+    let success_rate =
+        (concept.successful_recall_count as f64 + 1.0) / (resolved as f64 + 2.0);
     let diversity = (concept.unique_session_count as f64 / 5.0).min(1.0);
     let anchor = concept.last_recalled_at.or(concept.created_at);
     let days = days_since(&anchor);

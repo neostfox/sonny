@@ -425,9 +425,13 @@ fn recall_with_hierarchy(
 
 ## Post-Recall Tracking
 
-After each recall, update concept vitality metrics:
+After each recall, record only the *attempt* (`record_recall`):
 
 - `recall_count += 1`
 - `last_recalled_at = now`
-- If user continues without correction: `successful_recall_count += 1`
-- If user corrects: `failed_recall_count += 1` + trigger Bayesian revision
+
+Success/failure is resolved **later, by explicit feedback** (`record_recall_outcome`, P4-B closed loop) — retrieval itself is never a success:
+
+- Explicit positive feedback (Confirm/Supplement/Preference): `successful_recall_count += 1`
+- Explicit negative feedback (Negate/Correct): `failed_recall_count += 1` + trigger Bayesian revision
+- No feedback (silence): neither counter moves — a neutral, unresolved attempt (see quality-control.md §Concept Vitality for why silence ≠ failure)

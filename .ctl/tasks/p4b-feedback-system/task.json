@@ -4,11 +4,11 @@
     "cargo_test"
   ],
   "id": "p4b-feedback-system",
-  "is_archived": false,
+  "is_archived": true,
   "is_held": false,
-  "last_event_seq": 7,
+  "last_event_seq": 12,
   "objective": "P4-B Feedback 反馈闭环：feedback 表 + Confirm/Negate/Supplement/Correct/Preference 分类 + concept/observation confidence 更新 + Negate→rejected_hypothesis + Correct→P2-D supersede；recall 只计 recall_count，成功/失败由显式反馈驱动（关闭 rehearsal 正反馈）",
-  "phase": "review",
+  "phase": "completed",
   "read_scope": [
     ".ctl/spec/memory-runtime",
     "crates/memory-runtime/src"

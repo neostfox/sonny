@@ -4,11 +4,11 @@
     "cargo_test"
   ],
   "id": "p4b-f2-integrity",
-  "is_archived": false,
+  "is_archived": true,
   "is_held": false,
-  "last_event_seq": 4,
+  "last_event_seq": 9,
   "objective": "P4-B 审计 F2：apply_feedback 全程单事务原子化（concept 修订+recall outcome+observation negate/correct+feedback 账本一起提交或回滚），FeedbackEngine 改持共享连接，store 写体抽为 pub(crate) &Connection 自由函数复用；migration 009 给 feedback（FK→concept/observation）和 concept_relation（FK→concept，修 P5-A 悬挂端点）补外键约束；relation_store 6 个不建概念的边测试补种概念端点",
-  "phase": "review",
+  "phase": "completed",
   "read_scope": [
     "crates/memory-runtime/src"
   ],

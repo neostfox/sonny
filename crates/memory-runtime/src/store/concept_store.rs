@@ -156,12 +156,7 @@ impl ConceptStore for SqliteConceptStore {
 
     fn get_concept(&self, concept_id: &str) -> MemoryResult<Option<Concept>> {
         let conn = self.conn.lock();
-        let result = conn.query_row(&CONCEPT_GET, params![concept_id], row_to_concept);
-        match result {
-            Ok(c) => Ok(Some(c)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e.into()),
-        }
+        get_concept_conn(&conn, concept_id)
     }
 
     fn list_concepts(
@@ -182,27 +177,7 @@ impl ConceptStore for SqliteConceptStore {
 
     fn update_concept(&self, concept: &Concept) -> MemoryResult<()> {
         let conn = self.conn.lock();
-        let changed = conn.execute(
-            "UPDATE concept SET name = ?1, concept_type = ?2, definition = ?3, related_entities_json = ?4,
-             known_facts_json = ?5, rejected_hypotheses_json = ?6, open_questions_json = ?7, evidence_json = ?8,
-             confidence = ?9, evidence_alpha = ?10, evidence_beta = ?11, status = ?12,
-             parent_concept_id = ?13, hierarchy_depth = ?14, updated_at = ?15
-             WHERE concept_id = ?16",
-            params![
-                concept.name, concept.concept_type.as_ref().map(|t| t.as_str()),
-                concept.definition, concept.related_entities_json, concept.known_facts_json,
-                concept.rejected_hypotheses_json, concept.open_questions_json, concept.evidence_json,
-                concept.confidence, concept.evidence_alpha, concept.evidence_beta, concept.status.as_str(),
-                concept.parent_concept_id, concept.hierarchy_depth, concept.updated_at, concept.concept_id,
-            ],
-        )?;
-        if changed == 0 {
-            return Err(crate::error::MemoryError::ConceptNotFound {
-                concept_id: concept.concept_id.clone(),
-            });
-        }
-        sync_entity_concepts(&conn, concept)?;
-        Ok(())
+        update_concept_conn(&conn, concept)
     }
 
     fn find_by_entities(
@@ -247,19 +222,64 @@ impl ConceptStore for SqliteConceptStore {
 
     fn record_recall_outcome(&self, concept_id: &str, success: bool) -> MemoryResult<()> {
         let conn = self.conn.lock();
-        let now = chrono::Utc::now().to_rfc3339();
-        let sql = if success {
-            "UPDATE concept SET successful_recall_count = successful_recall_count + 1, updated_at = ?1 WHERE concept_id = ?2"
-        } else {
-            "UPDATE concept SET failed_recall_count = failed_recall_count + 1, updated_at = ?1 WHERE concept_id = ?2"
-        };
-        let changed = conn.execute(sql, params![&now, concept_id])?;
-        require_concept_row(changed, concept_id)
+        record_recall_outcome_conn(&conn, concept_id, success)
     }
 }
 
-/// H4 (quality-guidelines): recall-stat updates must not silently succeed on a
-/// non-existent concept_id.
+/// Read a concept by id on an already-held connection. Extracted so the feedback
+/// engine can read inside its own transaction scope without re-locking.
+pub(crate) fn get_concept_conn(
+    conn: &Connection,
+    concept_id: &str,
+) -> MemoryResult<Option<Concept>> {
+    match conn.query_row(&CONCEPT_GET, params![concept_id], row_to_concept) {
+        Ok(c) => Ok(Some(c)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Persist a concept revision (+entity re-sync) on an already-held connection.
+/// The write body is shared between `ConceptStore::update_concept` and the
+/// feedback engine's transaction so there is one source of SQL truth.
+pub(crate) fn update_concept_conn(conn: &Connection, concept: &Concept) -> MemoryResult<()> {
+    let changed = conn.execute(
+        "UPDATE concept SET name = ?1, concept_type = ?2, definition = ?3, related_entities_json = ?4,
+         known_facts_json = ?5, rejected_hypotheses_json = ?6, open_questions_json = ?7, evidence_json = ?8,
+         confidence = ?9, evidence_alpha = ?10, evidence_beta = ?11, status = ?12,
+         parent_concept_id = ?13, hierarchy_depth = ?14, updated_at = ?15
+         WHERE concept_id = ?16",
+        params![
+            concept.name, concept.concept_type.as_ref().map(|t| t.as_str()),
+            concept.definition, concept.related_entities_json, concept.known_facts_json,
+            concept.rejected_hypotheses_json, concept.open_questions_json, concept.evidence_json,
+            concept.confidence, concept.evidence_alpha, concept.evidence_beta, concept.status.as_str(),
+            concept.parent_concept_id, concept.hierarchy_depth, concept.updated_at, concept.concept_id,
+        ],
+    )?;
+    require_concept_row(changed, &concept.concept_id)?;
+    sync_entity_concepts(conn, concept)
+}
+
+/// Resolve a prior recall attempt (success/failure counters) on an already-held
+/// connection. Shared between the trait method and the feedback transaction.
+pub(crate) fn record_recall_outcome_conn(
+    conn: &Connection,
+    concept_id: &str,
+    success: bool,
+) -> MemoryResult<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let sql = if success {
+        "UPDATE concept SET successful_recall_count = successful_recall_count + 1, updated_at = ?1 WHERE concept_id = ?2"
+    } else {
+        "UPDATE concept SET failed_recall_count = failed_recall_count + 1, updated_at = ?1 WHERE concept_id = ?2"
+    };
+    let changed = conn.execute(sql, params![&now, concept_id])?;
+    require_concept_row(changed, concept_id)
+}
+
+/// H4 (quality-guidelines): recall-stat and revision updates must not silently
+/// succeed on a non-existent concept_id.
 fn require_concept_row(changed: usize, concept_id: &str) -> MemoryResult<()> {
     if changed == 0 {
         return Err(crate::error::MemoryError::ConceptNotFound {

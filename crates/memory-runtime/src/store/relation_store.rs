@@ -212,6 +212,15 @@ mod tests {
         (db, relations, concepts)
     }
 
+    /// Seed endpoint concepts so edges satisfy the concept_relation FK
+    /// (migration 009). The FK checks `concept_id` only, so workspace is
+    /// irrelevant here.
+    fn seed(concepts: &SqliteConceptStore, ids: &[&str]) {
+        for id in ids {
+            concepts.insert_concept(&concept(id)).unwrap();
+        }
+    }
+
     fn concept(id: &str) -> Concept {
         Concept {
             concept_id: id.to_string(),
@@ -242,7 +251,8 @@ mod tests {
 
     #[test]
     fn record_evidence_creates_then_accumulates() {
-        let (_db, relations, _) = store();
+        let (_db, relations, concepts) = store();
+        seed(&concepts, &["c-a", "c-b"]);
 
         let first = relations
             .record_evidence("ws", "c-a", "c-b", RelationType::Causal, &EvidenceType::FileEvidence)
@@ -260,7 +270,8 @@ mod tests {
 
     #[test]
     fn symmetric_edge_is_one_row_regardless_of_call_order() {
-        let (_db, relations, _) = store();
+        let (_db, relations, concepts) = store();
+        seed(&concepts, &["c-a", "c-b"]);
         relations
             .record_evidence("ws", "c-b", "c-a", RelationType::SharedEntity, &EvidenceType::RepeatedOccurrence)
             .unwrap();
@@ -276,7 +287,8 @@ mod tests {
 
     #[test]
     fn directed_edges_keep_reverse_direction_distinct() {
-        let (_db, relations, _) = store();
+        let (_db, relations, concepts) = store();
+        seed(&concepts, &["c-a", "c-b"]);
         relations
             .record_evidence("ws", "c-b", "c-a", RelationType::Causal, &EvidenceType::RepeatedOccurrence)
             .unwrap();
@@ -304,7 +316,8 @@ mod tests {
 
     #[test]
     fn neighbors_returns_both_directions_strongest_first() {
-        let (_db, relations, _) = store();
+        let (_db, relations, concepts) = store();
+        seed(&concepts, &["c-x", "c-hub", "c-y", "c-other", "c-unrelated"]);
         relations
             .record_evidence("ws", "c-x", "c-hub", RelationType::Causal, &EvidenceType::RepeatedOccurrence)
             .unwrap();
@@ -325,7 +338,8 @@ mod tests {
 
     #[test]
     fn unknown_enum_values_error_instead_of_coercing() {
-        let (db, relations, _) = store();
+        let (db, relations, concepts) = store();
+        seed(&concepts, &["c-a", "c-b"]);
         db.conn
             .lock()
             .execute(
@@ -340,8 +354,27 @@ mod tests {
     }
 
     #[test]
+    fn dangling_endpoint_is_rejected_by_fk() {
+        // P5-A audit + P4-B F2: migration 009 adds src/dst FKs to concept, so an
+        // edge to a non-existent concept can no longer be silently created.
+        let (_db, relations, concepts) = store();
+        seed(&concepts, &["c-a"]); // only the source exists
+
+        let err = relations.record_evidence(
+            "ws",
+            "c-a",
+            "c-ghost",
+            RelationType::Causal,
+            &EvidenceType::FileEvidence,
+        );
+        assert!(err.is_err(), "edge to a ghost concept must fail the FK");
+        assert!(relations.list_by_workspace("ws").unwrap().is_empty());
+    }
+
+    #[test]
     fn workspaces_are_isolated() {
-        let (_db, relations, _) = store();
+        let (_db, relations, concepts) = store();
+        seed(&concepts, &["c-a", "c-b"]);
         relations
             .record_evidence("ws-1", "c-a", "c-b", RelationType::Causal, &EvidenceType::RepeatedOccurrence)
             .unwrap();

@@ -707,7 +707,7 @@ async fn test_p4b_feedback_closes_recall_loop() {
     assert_eq!(after_recall.failed_recall_count, 0);
 
     // --- The user pushes back: "不对" targeting the observation. ---
-    let feedback_engine = FeedbackEngine::new(&concept_store, &obs_store, &feedback_store);
+    let feedback_engine = FeedbackEngine::new(db.conn.clone());
     let result = feedback_engine
         .apply_feedback(
             "ws",

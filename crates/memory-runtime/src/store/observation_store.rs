@@ -91,12 +91,7 @@ impl ObservationStore for SqliteObservationStore {
 
     fn get(&self, observation_id: &str) -> MemoryResult<Option<Observation>> {
         let conn = self.conn.lock();
-        let result = conn.query_row(&OBS_GET, [observation_id], row_to_observation);
-        match result {
-            Ok(obs) => Ok(Some(obs)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e.into()),
-        }
+        get_observation_conn(&conn, observation_id)
     }
 
     fn list_by_workspace(
@@ -126,34 +121,12 @@ impl ObservationStore for SqliteObservationStore {
 
     fn supersede(&self, observation_id: &str, superseded_by: &str) -> MemoryResult<()> {
         let conn = self.conn.lock();
-        let changed = conn.execute(
-            "UPDATE observation SET status = ?1, superseded_by = ?2 WHERE observation_id = ?3",
-            params![
-                ObservationStatus::Superseded.as_str(),
-                superseded_by,
-                observation_id
-            ],
-        )?;
-        if changed == 0 {
-            return Err(crate::error::MemoryError::ObservationNotFound {
-                observation_id: observation_id.to_string(),
-            });
-        }
-        Ok(())
+        supersede_observation_conn(&conn, observation_id, superseded_by)
     }
 
     fn update_confidence(&self, observation_id: &str, alpha: f64, beta: f64) -> MemoryResult<()> {
         let conn = self.conn.lock();
-        let changed = conn.execute(
-            "UPDATE observation SET evidence_alpha = ?1, evidence_beta = ?2 WHERE observation_id = ?3",
-            params![alpha, beta, observation_id],
-        )?;
-        if changed == 0 {
-            return Err(crate::error::MemoryError::ObservationNotFound {
-                observation_id: observation_id.to_string(),
-            });
-        }
-        Ok(())
+        update_observation_confidence_conn(&conn, observation_id, alpha, beta)
     }
 
     fn find_by_entity(&self, entity: &str, workspace_id: &str) -> MemoryResult<Vec<Observation>> {
@@ -238,9 +211,63 @@ fn collect_rows(
     Ok(rows)
 }
 
-/// Insert a single observation row. Shared by `insert`, `insert_batch`, and
-/// `replace_session_observations` so the 21-column param list lives in one place.
-fn insert_observation(conn: &Connection, obs: &Observation) -> rusqlite::Result<()> {
+/// Read an observation by id on an already-held connection (feedback engine
+/// reads inside its transaction scope).
+pub(crate) fn get_observation_conn(
+    conn: &Connection,
+    observation_id: &str,
+) -> MemoryResult<Option<Observation>> {
+    match conn.query_row(&OBS_GET, [observation_id], row_to_observation) {
+        Ok(obs) => Ok(Some(obs)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Update an observation's Beta evidence on an already-held connection.
+pub(crate) fn update_observation_confidence_conn(
+    conn: &Connection,
+    observation_id: &str,
+    alpha: f64,
+    beta: f64,
+) -> MemoryResult<()> {
+    let changed = conn.execute(
+        "UPDATE observation SET evidence_alpha = ?1, evidence_beta = ?2 WHERE observation_id = ?3",
+        params![alpha, beta, observation_id],
+    )?;
+    require_observation_row(changed, observation_id)
+}
+
+/// Supersede an observation on an already-held connection.
+pub(crate) fn supersede_observation_conn(
+    conn: &Connection,
+    observation_id: &str,
+    superseded_by: &str,
+) -> MemoryResult<()> {
+    let changed = conn.execute(
+        "UPDATE observation SET status = ?1, superseded_by = ?2 WHERE observation_id = ?3",
+        params![
+            ObservationStatus::Superseded.as_str(),
+            superseded_by,
+            observation_id
+        ],
+    )?;
+    require_observation_row(changed, observation_id)
+}
+
+fn require_observation_row(changed: usize, observation_id: &str) -> MemoryResult<()> {
+    if changed == 0 {
+        return Err(crate::error::MemoryError::ObservationNotFound {
+            observation_id: observation_id.to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// Insert a single observation row. Shared by `insert`, `insert_batch`,
+/// `replace_session_observations`, and the feedback engine's Correct path, so
+/// the 21-column param list lives in one place.
+pub(crate) fn insert_observation(conn: &Connection, obs: &Observation) -> rusqlite::Result<()> {
     let status = obs.status.as_str();
     let source = obs.source_type.as_str();
     conn.execute(

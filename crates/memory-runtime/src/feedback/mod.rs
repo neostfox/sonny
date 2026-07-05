@@ -10,20 +10,33 @@
 //! failed one, so a hot-but-wrong concept no longer strengthens itself just
 //! by being retrieved.
 //!
-//! Store calls are sequential, not one transaction: a crash mid-apply can
-//! leave the concept revised but the feedback row unwritten. Acceptable for
-//! v1 — the ledger is advisory; α/β on the concept is the source of truth.
+//! Persistence is atomic: the concept revision, recall-outcome counter, any
+//! observation negate/correct write, and the ledger row all commit in ONE
+//! SQLite transaction (`apply_feedback`), so a crash mid-apply can never leave
+//! the concept revised but the ledger short, nor a superseded observation
+//! without its replacement.
+
+use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use parking_lot::Mutex;
+use rusqlite::Connection;
 
-use crate::confidence::EvidenceType;
+use crate::confidence::{BetaConfidence, EvidenceType};
 use crate::entity::canonical_key_light;
 use crate::error::{MemoryError, MemoryResult};
 use crate::models::concept::{Concept, ConceptType};
 use crate::models::feedback::{Feedback, FeedbackResult, FeedbackType};
 use crate::models::observation::{Observation, ObservationSourceType};
 use crate::models::status::{ConceptStatus, ObservationStatus};
-use crate::store::traits::{ConceptStore, FeedbackStore, ObservationStore};
+use crate::store::concept_store::{
+    get_concept_conn, record_recall_outcome_conn, update_concept_conn,
+};
+use crate::store::feedback_store::insert_feedback_conn;
+use crate::store::observation_store::{
+    get_observation_conn, insert_observation, supersede_observation_conn,
+    update_observation_confidence_conn,
+};
 
 /// Below this confidence a revised concept is deprecated (quality-control.md
 /// §Confidence Status After Revision).
@@ -31,29 +44,33 @@ const DEPRECATION_THRESHOLD: f64 = 0.40;
 /// A low-confidence Candidate must be at least this old before deprecation.
 const CANDIDATE_GRACE_DAYS: f64 = 30.0;
 
-pub struct FeedbackEngine<'a, C, O, F>
-where
-    C: ConceptStore,
-    O: ObservationStore,
-    F: FeedbackStore,
-{
-    concepts: &'a C,
-    observations: &'a O,
-    feedback: &'a F,
+/// The observation-side write a feedback entails, computed in the pure phase
+/// and applied inside the transaction.
+enum ObsWrite {
+    None,
+    /// Negate: drop the target observation's Beta evidence to `(alpha, beta)`.
+    Confidence {
+        id: String,
+        alpha: f64,
+        beta: f64,
+    },
+    /// Correct: supersede `old_id` with a fresh `user_confirm` observation.
+    Supersede {
+        old_id: String,
+        replacement: Box<Observation>,
+    },
 }
 
-impl<'a, C, O, F> FeedbackEngine<'a, C, O, F>
-where
-    C: ConceptStore,
-    O: ObservationStore,
-    F: FeedbackStore,
-{
-    pub fn new(concepts: &'a C, observations: &'a O, feedback: &'a F) -> Self {
-        Self {
-            concepts,
-            observations,
-            feedback,
-        }
+/// P4-B feedback engine. Owns the shared connection directly (rather than the
+/// store traits) so `apply_feedback` can wrap all of its writes in a single
+/// transaction; the per-table SQL is reused from the stores' `*_conn` helpers.
+pub struct FeedbackEngine {
+    conn: Arc<Mutex<Connection>>,
+}
+
+impl FeedbackEngine {
+    pub fn new(conn: Arc<Mutex<Connection>>) -> Self {
+        Self { conn }
     }
 
     /// Apply one piece of user feedback to a recalled concept.
@@ -70,6 +87,9 @@ where
     ///   text as a known fact (recall surfaces it under user_preferences);
     /// - resolves the pending recall outcome (success/failure counters);
     /// - appends the event to the feedback ledger.
+    ///
+    /// Reads happen first, then a pure computation, then every write commits in
+    /// one transaction — all-or-nothing.
     pub fn apply_feedback(
         &self,
         workspace_id: &str,
@@ -80,32 +100,56 @@ where
         let now = Utc::now();
         let now_str = now.to_rfc3339();
 
-        let mut concept = self
-            .concepts
-            .get_concept(concept_id)?
-            .filter(|c| c.workspace_id == workspace_id)
-            .ok_or_else(|| MemoryError::ConceptNotFound {
-                concept_id: concept_id.to_string(),
-            })?;
+        // ---- Read phase: load the concept (+ target observation) ----
+        let (mut concept, target_obs) = {
+            let conn = self.conn.lock();
+            let concept = get_concept_conn(&conn, concept_id)?
+                .filter(|c| c.workspace_id == workspace_id)
+                .ok_or_else(|| MemoryError::ConceptNotFound {
+                    concept_id: concept_id.to_string(),
+                })?;
+            let target_obs = match target_observation_id {
+                Some(id) => Some(get_observation_conn(&conn, id)?.ok_or_else(|| {
+                    MemoryError::ObservationNotFound {
+                        observation_id: id.to_string(),
+                    }
+                })?),
+                None => None,
+            };
+            (concept, target_obs)
+        };
 
+        // ---- Pure phase: compute the new concept, observation op, ledger row ----
         let feedback_type = classify_feedback(feedback_text);
         let (alpha_delta, beta_delta) = feedback_type.revision_weights();
 
         concept.evidence_alpha += alpha_delta;
         concept.evidence_beta += beta_delta;
-        concept.confidence = concept.evidence_alpha / (concept.evidence_alpha + concept.evidence_beta);
+        concept.confidence =
+            concept.evidence_alpha / (concept.evidence_alpha + concept.evidence_beta);
         let status_changed = apply_status_rule(&mut concept, now);
 
+        let mut obs_write = ObsWrite::None;
         match feedback_type {
             FeedbackType::Negate => {
                 append_json_item(&mut concept.rejected_hypotheses_json, feedback_text);
-                if let Some(obs_id) = target_observation_id {
-                    self.negate_observation(obs_id)?;
+                if let Some(obs) = &target_obs {
+                    let mut evidence =
+                        BetaConfidence::with_values(obs.evidence_alpha, obs.evidence_beta);
+                    evidence.update(&EvidenceType::UserNegation);
+                    obs_write = ObsWrite::Confidence {
+                        id: obs.observation_id.clone(),
+                        alpha: evidence.alpha,
+                        beta: evidence.beta,
+                    };
                 }
             }
             FeedbackType::Correct => {
-                if let Some(obs_id) = target_observation_id {
-                    self.correct_observation(obs_id, feedback_text, &now_str)?;
+                if let Some(obs) = &target_obs {
+                    obs_write = ObsWrite::Supersede {
+                        old_id: obs.observation_id.clone(),
+                        replacement: Box::new(build_correction(obs, feedback_text, &now_str)),
+                    };
                 }
             }
             FeedbackType::Supplement => {
@@ -119,17 +163,10 @@ where
             }
             FeedbackType::Confirm | FeedbackType::General => {}
         }
-
         concept.updated_at = now_str.clone();
-        self.concepts.update_concept(&concept)?;
 
-        // Closed loop: the explicit reaction — not the retrieval itself —
-        // decides whether the recall counts as successful (P4-C audit fix).
-        if let Some(success) = feedback_type.recall_outcome() {
-            self.concepts.record_recall_outcome(concept_id, success)?;
-        }
-
-        self.feedback.insert(&Feedback {
+        let outcome = feedback_type.recall_outcome();
+        let feedback_row = Feedback {
             feedback_id: uuid::Uuid::new_v4().to_string(),
             workspace_id: workspace_id.to_string(),
             concept_id: concept_id.to_string(),
@@ -139,7 +176,34 @@ where
             alpha_delta,
             beta_delta,
             created_at: now_str,
-        })?;
+        };
+
+        // ---- Write phase: everything commits together or not at all ----
+        {
+            let mut guard = self.conn.lock();
+            let tx = guard.transaction()?;
+            update_concept_conn(&tx, &concept)?;
+            // Closed loop: the explicit reaction — not the retrieval itself —
+            // decides whether the recall counts as successful (P4-C audit fix).
+            if let Some(success) = outcome {
+                record_recall_outcome_conn(&tx, concept_id, success)?;
+            }
+            match &obs_write {
+                ObsWrite::None => {}
+                ObsWrite::Confidence { id, alpha, beta } => {
+                    update_observation_confidence_conn(&tx, id, *alpha, *beta)?;
+                }
+                ObsWrite::Supersede {
+                    old_id,
+                    replacement,
+                } => {
+                    insert_observation(&tx, replacement)?;
+                    supersede_observation_conn(&tx, old_id, &replacement.observation_id)?;
+                }
+            }
+            insert_feedback_conn(&tx, &feedback_row)?;
+            tx.commit()?;
+        }
 
         Ok(FeedbackResult {
             feedback_type,
@@ -149,69 +213,40 @@ where
             new_status: status_changed.then(|| concept.status.as_str().to_string()),
         })
     }
+}
 
-    fn negate_observation(&self, observation_id: &str) -> MemoryResult<()> {
-        let obs = self
-            .observations
-            .get(observation_id)?
-            .ok_or_else(|| MemoryError::ObservationNotFound {
-                observation_id: observation_id.to_string(),
-            })?;
-        let mut evidence =
-            crate::confidence::BetaConfidence::with_values(obs.evidence_alpha, obs.evidence_beta);
-        evidence.update(&EvidenceType::UserNegation);
-        self.observations
-            .update_confidence(observation_id, evidence.alpha, evidence.beta)
+/// Build the `user_confirm` replacement observation for a Correct feedback
+/// (P2-D single-observation analog of `reextract`): same subject/predicate as
+/// the superseded row, the correction as object, evidence seeded from the
+/// UserConfirm source.
+fn build_correction(old: &Observation, feedback_text: &str, now: &str) -> Observation {
+    let source_type = ObservationSourceType::UserConfirm;
+    let mut evidence = BetaConfidence::new();
+    if let Some(et) = source_type.initial_evidence() {
+        evidence.update(&et);
     }
-
-    /// P2-D single-observation analog of `reextract`: the old row flips to
-    /// Superseded pointing at its replacement; the correction becomes a fresh
-    /// `user_confirm` observation on the same subject/predicate.
-    fn correct_observation(
-        &self,
-        observation_id: &str,
-        feedback_text: &str,
-        now: &str,
-    ) -> MemoryResult<()> {
-        let old = self
-            .observations
-            .get(observation_id)?
-            .ok_or_else(|| MemoryError::ObservationNotFound {
-                observation_id: observation_id.to_string(),
-            })?;
-
-        let source_type = ObservationSourceType::UserConfirm;
-        let mut evidence = crate::confidence::BetaConfidence::new();
-        if let Some(et) = source_type.initial_evidence() {
-            evidence.update(&et);
-        }
-        let replacement = Observation {
-            observation_id: uuid::Uuid::new_v4().to_string(),
-            workspace_id: old.workspace_id.clone(),
-            memory_id: old.memory_id.clone(),
-            subject_text: old.subject_text.clone(),
-            subject_type: old.subject_type.clone(),
-            predicate: old.predicate.clone(),
-            object_text: Some(feedback_text.to_string()),
-            object_type: None,
-            evidence_text: Some(feedback_text.to_string()),
-            extraction_confidence: source_type.extraction_confidence(),
-            evidence_alpha: evidence.alpha,
-            evidence_beta: evidence.beta,
-            status: ObservationStatus::Candidate,
-            surprise_score: old.surprise_score,
-            source_type,
-            consolidated: false,
-            memory_type_candidate: old.memory_type_candidate.clone(),
-            observation_detail_json: None,
-            extraction_batch_id: None,
-            superseded_by: None,
-            created_at: now.to_string(),
-        };
-
-        self.observations.insert(&replacement)?;
-        self.observations
-            .supersede(observation_id, &replacement.observation_id)
+    Observation {
+        observation_id: uuid::Uuid::new_v4().to_string(),
+        workspace_id: old.workspace_id.clone(),
+        memory_id: old.memory_id.clone(),
+        subject_text: old.subject_text.clone(),
+        subject_type: old.subject_type.clone(),
+        predicate: old.predicate.clone(),
+        object_text: Some(feedback_text.to_string()),
+        object_type: None,
+        evidence_text: Some(feedback_text.to_string()),
+        extraction_confidence: source_type.extraction_confidence(),
+        evidence_alpha: evidence.alpha,
+        evidence_beta: evidence.beta,
+        status: ObservationStatus::Candidate,
+        surprise_score: old.surprise_score,
+        source_type,
+        consolidated: false,
+        memory_type_candidate: old.memory_type_candidate.clone(),
+        observation_detail_json: None,
+        extraction_batch_id: None,
+        superseded_by: None,
+        created_at: now.to_string(),
     }
 }
 
@@ -357,6 +392,7 @@ mod tests {
     use crate::store::connection::Database;
     use crate::store::feedback_store::SqliteFeedbackStore;
     use crate::store::observation_store::SqliteObservationStore;
+    use crate::store::traits::{ConceptStore, FeedbackStore, ObservationStore};
 
     fn concept(id: &str, status: ConceptStatus, alpha: f64, beta: f64) -> Concept {
         Concept {
@@ -479,13 +515,12 @@ mod tests {
     fn confirm_raises_confidence_and_counts_successful_recall() {
         let fx = Fixture::new();
         let concepts = fx.concepts();
-        let observations = fx.observations();
         let feedback = fx.feedback();
         concepts
             .insert_concept(&concept("c1", ConceptStatus::Active, 1.0, 1.0))
             .unwrap();
 
-        let engine = FeedbackEngine::new(&concepts, &observations, &feedback);
+        let engine = FeedbackEngine::new(fx.db.conn.clone());
         let result = engine.apply_feedback("ws", "c1", "没错，就是这个", None).unwrap();
 
         assert_eq!(result.feedback_type, FeedbackType::Confirm);
@@ -507,13 +542,12 @@ mod tests {
         let fx = Fixture::new();
         let concepts = fx.concepts();
         let observations = fx.observations();
-        let feedback = fx.feedback();
         concepts
             .insert_concept(&concept("c1", ConceptStatus::Active, 1.0, 1.0))
             .unwrap();
         observations.insert(&observation("o1")).unwrap();
 
-        let engine = FeedbackEngine::new(&concepts, &observations, &feedback);
+        let engine = FeedbackEngine::new(fx.db.conn.clone());
         let result = engine
             .apply_feedback("ws", "c1", "不对，POSMASK 没有机器字段", Some("o1"))
             .unwrap();
@@ -543,13 +577,12 @@ mod tests {
         let fx = Fixture::new();
         let concepts = fx.concepts();
         let observations = fx.observations();
-        let feedback = fx.feedback();
         concepts
             .insert_concept(&concept("c1", ConceptStatus::Active, 4.0, 1.0))
             .unwrap();
         observations.insert(&observation("o1")).unwrap();
 
-        let engine = FeedbackEngine::new(&concepts, &observations, &feedback);
+        let engine = FeedbackEngine::new(fx.db.conn.clone());
         let result = engine
             .apply_feedback("ws", "c1", "其实是金额字段", Some("o1"))
             .unwrap();
@@ -575,13 +608,11 @@ mod tests {
     fn supplement_merges_new_entities_and_counts_success() {
         let fx = Fixture::new();
         let concepts = fx.concepts();
-        let observations = fx.observations();
-        let feedback = fx.feedback();
         concepts
             .insert_concept(&concept("c1", ConceptStatus::Active, 1.0, 1.0))
             .unwrap();
 
-        let engine = FeedbackEngine::new(&concepts, &observations, &feedback);
+        let engine = FeedbackEngine::new(fx.db.conn.clone());
         engine
             .apply_feedback("ws", "c1", "还有 ORDERHDR 也相关", None)
             .unwrap();
@@ -605,13 +636,11 @@ mod tests {
     fn preference_types_concept_and_stores_fact() {
         let fx = Fixture::new();
         let concepts = fx.concepts();
-        let observations = fx.observations();
-        let feedback = fx.feedback();
         concepts
             .insert_concept(&concept("c1", ConceptStatus::Active, 1.0, 1.0))
             .unwrap();
 
-        let engine = FeedbackEngine::new(&concepts, &observations, &feedback);
+        let engine = FeedbackEngine::new(fx.db.conn.clone());
         engine
             .apply_feedback("ws", "c1", "我喜欢用 ripgrep 搜索", None)
             .unwrap();
@@ -627,13 +656,12 @@ mod tests {
     fn general_feedback_changes_nothing_but_is_ledgered() {
         let fx = Fixture::new();
         let concepts = fx.concepts();
-        let observations = fx.observations();
         let feedback = fx.feedback();
         concepts
             .insert_concept(&concept("c1", ConceptStatus::Active, 2.0, 1.0))
             .unwrap();
 
-        let engine = FeedbackEngine::new(&concepts, &observations, &feedback);
+        let engine = FeedbackEngine::new(fx.db.conn.clone());
         let result = engine.apply_feedback("ws", "c1", "嗯，继续吧", None).unwrap();
 
         assert_eq!(result.feedback_type, FeedbackType::General);
@@ -648,8 +676,6 @@ mod tests {
     fn young_candidate_survives_negation_but_old_one_deprecates() {
         let fx = Fixture::new();
         let concepts = fx.concepts();
-        let observations = fx.observations();
-        let feedback = fx.feedback();
 
         let mut young = concept("young", ConceptStatus::Candidate, 1.0, 1.0);
         young.created_at = Utc::now().to_rfc3339();
@@ -658,7 +684,7 @@ mod tests {
         old.created_at = (Utc::now() - chrono::Duration::days(45)).to_rfc3339();
         concepts.insert_concept(&old).unwrap();
 
-        let engine = FeedbackEngine::new(&concepts, &observations, &feedback);
+        let engine = FeedbackEngine::new(fx.db.conn.clone());
         let young_result = engine.apply_feedback("ws", "young", "不对", None).unwrap();
         let old_result = engine.apply_feedback("ws", "old", "不对", None).unwrap();
 
@@ -674,17 +700,39 @@ mod tests {
     fn wrong_workspace_is_concept_not_found() {
         let fx = Fixture::new();
         let concepts = fx.concepts();
-        let observations = fx.observations();
-        let feedback = fx.feedback();
         concepts
             .insert_concept(&concept("c1", ConceptStatus::Active, 1.0, 1.0))
             .unwrap();
 
-        let engine = FeedbackEngine::new(&concepts, &observations, &feedback);
+        let engine = FeedbackEngine::new(fx.db.conn.clone());
         let err = engine.apply_feedback("other-ws", "c1", "没错", None);
         assert!(matches!(
             err,
             Err(MemoryError::ConceptNotFound { .. })
         ));
+    }
+
+    #[test]
+    fn failed_feedback_leaves_no_partial_state() {
+        // F2 atomicity: a Negate whose target observation is missing must abort
+        // with nothing written — the concept keeps its α/β and the ledger stays
+        // empty (the read phase fails before the write transaction opens).
+        let fx = Fixture::new();
+        let concepts = fx.concepts();
+        let feedback = fx.feedback();
+        concepts
+            .insert_concept(&concept("c1", ConceptStatus::Active, 1.0, 1.0))
+            .unwrap();
+
+        let engine = FeedbackEngine::new(fx.db.conn.clone());
+        let err = engine.apply_feedback("ws", "c1", "不对", Some("ghost-obs"));
+        assert!(matches!(err, Err(MemoryError::ObservationNotFound { .. })));
+
+        let unchanged = concepts.get_concept("c1").unwrap().unwrap();
+        assert_eq!(unchanged.evidence_alpha, 1.0);
+        assert_eq!(unchanged.evidence_beta, 1.0);
+        assert_eq!(unchanged.failed_recall_count, 0);
+        assert!(unchanged.rejected_hypotheses_json.is_none());
+        assert!(feedback.list_by_concept("ws", "c1").unwrap().is_empty());
     }
 }

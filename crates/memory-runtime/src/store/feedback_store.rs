@@ -59,24 +59,30 @@ fn row_to_feedback(row: &rusqlite::Row<'_>) -> rusqlite::Result<Feedback> {
     })
 }
 
+/// Insert a feedback row on an already-held connection. Shared between the
+/// trait method and the feedback engine's transaction.
+pub(crate) fn insert_feedback_conn(conn: &Connection, feedback: &Feedback) -> MemoryResult<()> {
+    conn.execute(
+        &FEEDBACK_INSERT,
+        params![
+            feedback.feedback_id,
+            feedback.workspace_id,
+            feedback.concept_id,
+            feedback.observation_id,
+            feedback.feedback_type.as_str(),
+            feedback.feedback_text,
+            feedback.alpha_delta,
+            feedback.beta_delta,
+            feedback.created_at,
+        ],
+    )?;
+    Ok(())
+}
+
 impl FeedbackStore for SqliteFeedbackStore {
     fn insert(&self, feedback: &Feedback) -> MemoryResult<()> {
         let conn = self.conn.lock();
-        conn.execute(
-            &FEEDBACK_INSERT,
-            params![
-                feedback.feedback_id,
-                feedback.workspace_id,
-                feedback.concept_id,
-                feedback.observation_id,
-                feedback.feedback_type.as_str(),
-                feedback.feedback_text,
-                feedback.alpha_delta,
-                feedback.beta_delta,
-                feedback.created_at,
-            ],
-        )?;
-        Ok(())
+        insert_feedback_conn(&conn, feedback)
     }
 
     fn list_by_concept(
@@ -98,6 +104,20 @@ mod tests {
     use super::*;
     use crate::store::connection::Database;
 
+    /// Seed minimal concept rows so feedback rows satisfy the concept_id FK
+    /// (migration 009).
+    fn seed_concepts(db: &Database, ids: &[&str]) {
+        let conn = db.conn.lock();
+        for id in ids {
+            conn.execute(
+                "INSERT INTO concept (concept_id, workspace_id, name, created_at, updated_at) \
+                 VALUES (?1, 'ws', ?1, 't0', 't0')",
+                params![id],
+            )
+            .unwrap();
+        }
+    }
+
     fn feedback(id: &str, concept: &str, ft: FeedbackType) -> Feedback {
         Feedback {
             feedback_id: id.to_string(),
@@ -115,6 +135,7 @@ mod tests {
     #[test]
     fn insert_and_list_round_trips() {
         let db = Database::open_in_memory().unwrap();
+        seed_concepts(&db, &["c1", "c2"]);
         let store = SqliteFeedbackStore::new(db.conn.clone());
 
         store
@@ -139,6 +160,7 @@ mod tests {
     #[test]
     fn duplicate_feedback_id_is_rejected() {
         let db = Database::open_in_memory().unwrap();
+        seed_concepts(&db, &["c1"]);
         let store = SqliteFeedbackStore::new(db.conn.clone());
 
         store

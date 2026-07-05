@@ -4,11 +4,11 @@
     "cargo_test"
   ],
   "id": "p4b-review-fixes",
-  "is_archived": false,
+  "is_archived": true,
   "is_held": false,
-  "last_event_seq": 4,
+  "last_event_seq": 9,
   "objective": "P4-B 审计遗留修复：F1 反馈分类 ASCII 关键词词界匹配 + 单字 CJK 边界匹配（消除 'no'⊂'know'、'针对'⊃'对' 误判），同步 quality-control.md 分类原型；F4 backend spec 4 处 update_recall_stats 改为 record_recall/record_recall_outcome 拆分语义",
-  "phase": "review",
+  "phase": "completed",
   "read_scope": [
     ".ctl/spec",
     "crates/memory-runtime/src"

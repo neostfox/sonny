@@ -283,14 +283,29 @@ fn classify_feedback(feedback_text: &str) -> &str {
     let confirm_keywords = ["对", "没错", "正确", "是的", "yes", "right", "就是这个"];
     let supplement_keywords = ["还有", "补充", "另外", "加上", "also", "and"];
     let correct_keywords = ["应该是", "其实是", "实际上是", "actually", "should be"];
+    let preference_keywords = ["偏好", "以后都", "我喜欢", "prefer", "i like", "always use"];
 
-    if negate_keywords.iter().any(|kw| feedback_text.contains(kw)) { return "negate"; }
-    if confirm_keywords.iter().any(|kw| feedback_text.contains(kw)) { return "confirm"; }
-    if supplement_keywords.iter().any(|kw| feedback_text.contains(kw)) { return "supplement"; }
-    if correct_keywords.iter().any(|kw| feedback_text.contains(kw)) { return "correct"; }
+    // keyword_hit is boundary-aware, NOT raw substring — see rules below.
+    if negate_keywords.iter().any(|kw| keyword_hit(feedback_text, kw)) { return "negate"; }
+    if confirm_keywords.iter().any(|kw| keyword_hit(feedback_text, kw)) { return "confirm"; }
+    if supplement_keywords.iter().any(|kw| keyword_hit(feedback_text, kw)) { return "supplement"; }
+    if correct_keywords.iter().any(|kw| keyword_hit(feedback_text, kw)) { return "correct"; }
+    if preference_keywords.iter().any(|kw| keyword_hit(feedback_text, kw)) { return "preference"; }
     "general"
 }
 ```
+
+**Matching rules** (P4-B audit F1 — raw `contains` misclassified "I don't
+know" as negate via `no` ⊂ "know" and "针对…" as confirm via `对`):
+
+- Input is lowercased first; classification order is significant (negate
+  before confirm, so "不对" can never hit confirm's "对").
+- **ASCII keywords** and **single-character CJK keywords** match only with
+  non-word neighbors on both sides (word chars = `is_alphanumeric()`, which
+  includes CJK — so "针对" does not contain a standalone "对").
+- **Multi-character CJK keywords** remain substring matches: Chinese has no
+  delimiter to anchor a boundary on, and "还有一个" must still hit "还有".
+- Implementation: `feedback::classify_feedback` / `keyword_hit`.
 
 ### Revision Actions
 

@@ -118,8 +118,8 @@ where
 - `entity_overlap()`: Jaccard similarity between query entities and concept's `related_entities_json`
 
 **Post-Recall Updates:**
-- Top 3 concepts get `update_recall_stats()` called (increments `recall_count`, updates `last_recalled_at`)
-- Successful recall counted when `current_concept` is present
+- Top 3 concepts get `record_recall()` called when `current_concept` is present (increments `recall_count`, updates `last_recalled_at` — attempt only)
+- `successful_recall_count` / `failed_recall_count` move solely via `record_recall_outcome()` driven by explicit user feedback (P4-B closed loop); retrieval itself never counts as success
 - `token_count` field on `MemoryContext` is enforced by `enforce_total_budget()`.
 
 **Entity Extraction** (`extract_query_entities()`):

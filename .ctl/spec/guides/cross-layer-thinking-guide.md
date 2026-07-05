@@ -24,7 +24,7 @@ P4-A is implemented. For changes to recall:
 3. **Semantic search** embeds query via `EmbeddingProvider`, searches `EmbeddingStore` for top-K.
 4. **Scoring** weights: `SEMANTIC_WEIGHT=0.6`, `ENTITY_WEIGHT=0.4`. `RecallScore` tracks both channels.
 5. **Token budget** is dynamic per `Intent`: `RecallBudget::for_intent(intent, max_tokens)`. `enforce_total_budget()` pops lowest-priority items.
-6. **RecallStats** are updated via `ConceptStore::update_recall_stats()` for top 3 concepts.
+6. **RecallStats** — top 3 concepts get `ConceptStore::record_recall()` (attempt count + forgetting-clock reset only); success/failure is resolved later by explicit feedback via `record_recall_outcome()` (P4-B closed loop).
 7. **`MemoryContext.token_count`** reflects actual output tokens (estimated).
 
 Key constants in `recall/mod.rs`:
@@ -39,7 +39,7 @@ const SEMANTIC_THRESHOLD: f32 = 0.0;
 For changes to recall that touch store traits:
 - `ConceptStore::find_by_entities()` — entity match
 - `ConceptStore::list_concepts()` — load candidates
-- `ConceptStore::update_recall_stats()` — post-recall updates
+- `ConceptStore::record_recall()` / `record_recall_outcome()` — recall attempt vs. feedback-resolved outcome (P4-B)
 - `EmbeddingStore::search()` — semantic search
 - `EmbeddingProvider::embed()` — query embedding
 

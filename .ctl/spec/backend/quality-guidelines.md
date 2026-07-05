@@ -102,7 +102,7 @@ conn.execute(
 | H1 | `list_by_workspace` for observations has no LIMIT | `observation_store.rs` | Large workspace may be slow |
 | H2 | `obs_params` / `candidate_params` heap-allocate 17-23 `Box<dyn ToSql>` per row | `observation_store.rs`, `concept_store.rs` | Batch insert overhead |
 | H3 | `parse_observation_status` etc. silently default on invalid DB values | `observation_store.rs`, `concept_store.rs` | Corrupted state hidden |
-| H4 | `update_recall_stats` doesn't check affected row count | `concept_store.rs` | Non-existent concept_id silently succeeds |
+| H4 | ~~`update_recall_stats` doesn't check affected row count~~ ✅ Resolved (P4-B): successor methods `record_recall`/`record_recall_outcome` return `ConceptNotFound` on zero rows | `concept_store.rs` | — |
 | H5 | `find_by_entities` uses `LIKE '%?%'` on JSON columns | `concept_store.rs` | False positives: "user" matches "user_profile" |
 
 ### 🟡 Medium

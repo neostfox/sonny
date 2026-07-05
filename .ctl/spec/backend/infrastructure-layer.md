@@ -45,7 +45,7 @@ Four traits, all `Send + Sync`:
 |-------|------------|
 | `RawMemoryStore` | `insert`, `insert_batch`, `get_by_session`, `list_by_workspace`, `session_extraction_version`, `set_session_extraction_version` |
 | `ObservationStore` | `insert`, `insert_batch`, `get`, `list_by_workspace`, `update_status`, `update_confidence`, `find_by_entity`, `find_coclaim`, `find_duplicate`, `replace_session_observations` |
-| `ConceptStore` | `insert_candidate`, `get_candidate`, `list_candidates`, `insert_concept`, `get_concept`, `list_concepts`, `update_concept`, `find_by_entities`, `update_recall_stats` |
+| `ConceptStore` | `insert_candidate`, `get_candidate`, `list_candidates`, `insert_concept`, `get_concept`, `list_concepts`, `update_concept`, `find_by_entities`, `record_recall`, `record_recall_outcome` |
 | `EmbeddingStore` | `store_embedding`, `search`, `get_embedding`, `delete` |
 
 ## Implementations
@@ -64,7 +64,7 @@ Four traits, all `Send + Sync`:
 ### SqliteConceptStore (`concept_store.rs`)
 
 - **`find_by_entities()`**: Uses `entity_concept` JOIN table for exact entity matching.
-- **`update_recall_stats()`**: Increments recall counts, updates `last_recalled_at`.
+- **`record_recall()`**: increments `recall_count`, updates `last_recalled_at` (attempt only). **`record_recall_outcome()`**: increments `successful_recall_count`/`failed_recall_count` from explicit feedback (P4-B). Both return `ConceptNotFound` on zero affected rows (H4 resolved).
 - JSON fields: `known_facts_json`, `rejected_hypotheses_json`, `open_questions_json`, `evidence_json` stored as TEXT.
 
 ### SqliteEmbeddingStore (`embedding_store.rs`)

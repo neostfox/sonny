@@ -219,6 +219,12 @@ where
 /// a preference branch appended — the spec's revision table has a
 /// `preference` type but its classifier sketch omits it. Order matters:
 /// negate wins over confirm so "不对" never matches confirm's "对".
+///
+/// Matching is boundary-aware, not raw substring (P4-B audit F1): ASCII
+/// keywords and single-character CJK keywords require non-word neighbors, so
+/// "know" no longer negates via `no` and "针对" no longer confirms via `对`.
+/// Multi-character CJK keywords stay substring — Chinese has no delimiter to
+/// anchor a word boundary on ("还有一个" must still hit "还有").
 pub fn classify_feedback(text: &str) -> FeedbackType {
     const TABLES: &[(FeedbackType, &[&str])] = &[
         (
@@ -245,11 +251,30 @@ pub fn classify_feedback(text: &str) -> FeedbackType {
 
     let lower = text.to_lowercase();
     for (feedback_type, keywords) in TABLES {
-        if keywords.iter().any(|kw| lower.contains(kw)) {
+        if keywords.iter().any(|kw| keyword_hit(&lower, kw)) {
             return feedback_type.clone();
         }
     }
     FeedbackType::General
+}
+
+/// Boundary-aware keyword test on lowercased text.
+fn keyword_hit(text: &str, keyword: &str) -> bool {
+    let needs_boundary = keyword.is_ascii() || keyword.chars().count() == 1;
+    if !needs_boundary {
+        return text.contains(keyword);
+    }
+    text.match_indices(keyword).any(|(start, _)| {
+        let before_is_word = text[..start]
+            .chars()
+            .next_back()
+            .is_some_and(|c| c.is_alphanumeric());
+        let after_is_word = text[start + keyword.len()..]
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_alphanumeric());
+        !before_is_word && !after_is_word
+    })
 }
 
 /// Status transition after revision (quality-control.md, adapted to the code's
@@ -430,6 +455,24 @@ mod tests {
         // Negate precedence: "不对" must not fall through to confirm's "对".
         assert_eq!(classify_feedback("不对"), FeedbackType::Negate);
         assert_eq!(classify_feedback("That is WRONG"), FeedbackType::Negate);
+    }
+
+    #[test]
+    fn classify_feedback_requires_word_boundaries() {
+        // F1: ASCII keywords must not match inside larger words.
+        assert_eq!(classify_feedback("I don't know"), FeedbackType::General); // no ⊄ know
+        assert_eq!(classify_feedback("I understand"), FeedbackType::General); // and ⊄ understand
+        assert_eq!(classify_feedback("take notes"), FeedbackType::General); // no ⊄ notes
+        assert_eq!(classify_feedback("no, that's it"), FeedbackType::Negate);
+        assert_eq!(classify_feedback("A and B"), FeedbackType::Supplement);
+        // F1: single-char CJK keyword "对" needs non-word neighbors.
+        assert_eq!(classify_feedback("针对这个再查一下"), FeedbackType::General);
+        assert_eq!(classify_feedback("对，就是这个"), FeedbackType::Confirm);
+        assert_eq!(classify_feedback("对"), FeedbackType::Confirm);
+        // Multi-char CJK keywords still match without delimiters.
+        assert_eq!(classify_feedback("还有一个字段"), FeedbackType::Supplement);
+        // Multi-word ASCII keywords bound at the phrase edges.
+        assert_eq!(classify_feedback("it should be utf-8"), FeedbackType::Correct);
     }
 
     #[test]

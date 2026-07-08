@@ -137,12 +137,17 @@ where
         for mut score in scores.into_values() {
             match self.concepts.get_concept(&score.concept_id)? {
                 Some(concept) => {
-                    // Only Active concepts are recallable facts. The entity
-                    // channel already filters `status = active` in SQL; the
-                    // semantic channel searches raw embeddings, so a Superseded
-                    // or Deprecated concept could otherwise resurface as fact via
-                    // a lingering vector. Drop it here so both channels agree.
-                    if concept.status != ConceptStatus::Active {
+                    // Gate the semantic channel by status. Active concepts are
+                    // recallable facts; Disputed concepts are also surfaced, but
+                    // as a caveat ("X is disputed", see push_concept_summary) —
+                    // the semantic channel is their only route since the entity
+                    // channel is `status = active` only. Candidate/Labile/
+                    // Deprecated must NOT resurface as fact via a lingering
+                    // vector, so they are dropped here.
+                    if !matches!(
+                        concept.status,
+                        ConceptStatus::Active | ConceptStatus::Disputed
+                    ) {
                         continue;
                     }
                     score.recency = concept_recency(&concept, self.decay_half_life_days, now);
@@ -712,20 +717,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rank_excludes_non_active_concepts_from_semantic_channel() {
+    async fn rank_semantic_channel_gates_on_status() {
         // A Deprecated concept keeps its embedding vector; without a status
-        // filter the semantic channel would resurface it as fact. Only the
-        // Active concept may appear (matches the entity channel's SQL filter,
-        // which is `status = active` — Labile/Deprecated/etc. are all excluded).
+        // filter the semantic channel would resurface it as fact. It must be
+        // dropped — but a Disputed concept must still survive, because the
+        // semantic channel is its only route to surface as a caveat (the entity
+        // channel is `status = active` only, see push_concept_summary).
         let db = Database::open_in_memory().unwrap();
         let concept_store = SqliteConceptStore::new(db.conn.clone());
         let embedding_store = SqliteEmbeddingStore::new(db.conn.clone());
         let embedding = StaticEmbedding;
 
         let active = concept("c-active", "POSMASK-active", &["e-active"]);
+        let mut disputed = concept("c-disputed", "POSMASK-contested", &["e-disp"]);
+        disputed.status = ConceptStatus::Disputed;
         let mut dead = concept("c-dead", "POSMASK-old", &["e-old"]);
         dead.status = ConceptStatus::Deprecated;
-        for c in [&active, &dead] {
+        for c in [&active, &disputed, &dead] {
             concept_store.insert_concept(c).unwrap();
             embedding_store
                 .store_embedding("concept", &c.concept_id, "ws", &c.name, &[1.0, 0.0])
@@ -735,9 +743,11 @@ mod tests {
         let engine = RecallEngine::new(&concept_store, &embedding_store, &embedding);
         let ranked = engine.rank("explain POSMASK", "ws").await.unwrap();
 
-        assert_eq!(ranked.len(), 1);
-        assert_eq!(ranked[0].concept_id, "c-active");
-        assert!(ranked.iter().all(|s| s.concept_id != "c-dead"));
+        let ids: Vec<&str> = ranked.iter().map(|s| s.concept_id.as_str()).collect();
+        assert!(ids.contains(&"c-active"));
+        assert!(ids.contains(&"c-disputed")); // caveat path preserved
+        assert!(!ids.contains(&"c-dead")); // dead fact dropped
+        assert_eq!(ranked.len(), 2);
     }
 
     #[test]

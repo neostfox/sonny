@@ -4,11 +4,11 @@
     "cargo_test"
   ],
   "id": "p4-t2-recall-status",
-  "is_archived": false,
+  "is_archived": true,
   "is_held": false,
-  "last_event_seq": 4,
+  "last_event_seq": 11,
   "objective": "T2 语义通道概念状态过滤：rank() 中非 Active 概念（经残留 embedding）不得作为事实被召回，与实体通道 status=active 约定对齐；保留 embedding 孤儿 recency=1.0 兜底",
-  "phase": "review",
+  "phase": "completed",
   "read_scope": [
     "crates/memory-runtime/src/recall/mod.rs"
   ],

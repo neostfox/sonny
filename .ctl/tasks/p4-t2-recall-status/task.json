@@ -1,0 +1,21 @@
+{
+  "gates": [
+    "cargo_check",
+    "cargo_test"
+  ],
+  "id": "p4-t2-recall-status",
+  "is_archived": false,
+  "is_held": false,
+  "last_event_seq": 4,
+  "objective": "T2 语义通道概念状态过滤：rank() 中非 Active 概念（经残留 embedding）不得作为事实被召回，与实体通道 status=active 约定对齐；保留 embedding 孤儿 recency=1.0 兜底",
+  "phase": "review",
+  "read_scope": [
+    "crates/memory-runtime/src/recall/mod.rs"
+  ],
+  "risk_triggers": [],
+  "schema": "control.task-view.v1",
+  "write_allow": [
+    "crates/memory-runtime/src/recall/mod.rs"
+  ],
+  "write_deny": []
+}

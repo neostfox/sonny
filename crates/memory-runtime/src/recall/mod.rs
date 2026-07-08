@@ -135,14 +135,24 @@ where
         let now = Utc::now();
         let mut ranked = Vec::with_capacity(scores.len());
         for mut score in scores.into_values() {
-            score.recency = match self.concepts.get_concept(&score.concept_id)? {
-                Some(concept) => concept_recency(&concept, self.decay_half_life_days, now),
+            match self.concepts.get_concept(&score.concept_id)? {
+                Some(concept) => {
+                    // Only Active concepts are recallable facts. The entity
+                    // channel already filters `status = active` in SQL; the
+                    // semantic channel searches raw embeddings, so a Superseded
+                    // or Deprecated concept could otherwise resurface as fact via
+                    // a lingering vector. Drop it here so both channels agree.
+                    if concept.status != ConceptStatus::Active {
+                        continue;
+                    }
+                    score.recency = concept_recency(&concept, self.decay_half_life_days, now);
+                }
                 // Embedding orphan: a vector whose concept row is gone (deleted
                 // or not yet written). With no last_recalled_at to decay from,
                 // fall back to a neutral 1.0 rather than dropping the channel
                 // score — recency only ever attenuates, never invents salience.
-                None => 1.0,
-            };
+                None => score.recency = 1.0,
+            }
             score.score = (score.semantic_score * SEMANTIC_WEIGHT
                 + score.entity_score * ENTITY_WEIGHT)
                 * score.recency;
@@ -699,6 +709,35 @@ mod tests {
         assert!(fresh_score.recency > 0.95);
         assert!(rehearsed_score.recency > 0.95);
         assert!(fresh_score.score > ranked[2].score);
+    }
+
+    #[tokio::test]
+    async fn rank_excludes_non_active_concepts_from_semantic_channel() {
+        // A Deprecated concept keeps its embedding vector; without a status
+        // filter the semantic channel would resurface it as fact. Only the
+        // Active concept may appear (matches the entity channel's SQL filter,
+        // which is `status = active` — Labile/Deprecated/etc. are all excluded).
+        let db = Database::open_in_memory().unwrap();
+        let concept_store = SqliteConceptStore::new(db.conn.clone());
+        let embedding_store = SqliteEmbeddingStore::new(db.conn.clone());
+        let embedding = StaticEmbedding;
+
+        let active = concept("c-active", "POSMASK-active", &["e-active"]);
+        let mut dead = concept("c-dead", "POSMASK-old", &["e-old"]);
+        dead.status = ConceptStatus::Deprecated;
+        for c in [&active, &dead] {
+            concept_store.insert_concept(c).unwrap();
+            embedding_store
+                .store_embedding("concept", &c.concept_id, "ws", &c.name, &[1.0, 0.0])
+                .unwrap();
+        }
+
+        let engine = RecallEngine::new(&concept_store, &embedding_store, &embedding);
+        let ranked = engine.rank("explain POSMASK", "ws").await.unwrap();
+
+        assert_eq!(ranked.len(), 1);
+        assert_eq!(ranked[0].concept_id, "c-active");
+        assert!(ranked.iter().all(|s| s.concept_id != "c-dead"));
     }
 
     #[test]

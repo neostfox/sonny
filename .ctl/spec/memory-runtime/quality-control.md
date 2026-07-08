@@ -326,8 +326,9 @@ know" as negate via `no` ⊂ "know" and "针对…" as confirm via `对`):
 - Input is lowercased first; classification order is significant (negate
   before confirm, so "不对" can never hit confirm's "对").
 - **ASCII keywords** and **single-character CJK keywords** match only with
-  non-word neighbors on both sides (word chars = `is_alphanumeric()`, which
-  includes CJK — so "针对" does not contain a standalone "对").
+  non-word neighbors on both sides (word chars = `is_alphanumeric()` plus `_`
+  and `-`, which includes CJK — so "针对" does not contain a standalone "对",
+  and "no" does not negate inside identifier-like tokens `no_cache` / `no-op`).
 - **Multi-character CJK keywords** remain substring matches: Chinese has no
   delimiter to anchor a boundary on, and "还有一个" must still hit "还有".
 - Implementation: `feedback::classify_feedback` / `keyword_hit`.

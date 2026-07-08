@@ -300,16 +300,21 @@ fn keyword_hit(text: &str, keyword: &str) -> bool {
         return text.contains(keyword);
     }
     text.match_indices(keyword).any(|(start, _)| {
-        let before_is_word = text[..start]
-            .chars()
-            .next_back()
-            .is_some_and(|c| c.is_alphanumeric());
+        let before_is_word = text[..start].chars().next_back().is_some_and(is_word_char);
         let after_is_word = text[start + keyword.len()..]
             .chars()
             .next()
-            .is_some_and(|c| c.is_alphanumeric());
+            .is_some_and(is_word_char);
         !before_is_word && !after_is_word
     })
+}
+
+/// Word character for keyword-boundary purposes. `_` and `-` are treated as
+/// word characters (not delimiters) so identifier-like tokens don't split into
+/// keywords: without this, "no" would negate inside "no_cache"/"no-op" because
+/// `_`/`-` are not alphanumeric.
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_' || c == '-'
 }
 
 /// Status transition after revision (quality-control.md, adapted to the code's
@@ -501,6 +506,10 @@ mod tests {
         assert_eq!(classify_feedback("take notes"), FeedbackType::General); // no ⊄ notes
         assert_eq!(classify_feedback("no, that's it"), FeedbackType::Negate);
         assert_eq!(classify_feedback("A and B"), FeedbackType::Supplement);
+        // F1 follow-up: `_`/`-` are word chars, so identifier-like tokens don't
+        // split into keywords — "no" must not negate inside these.
+        assert_eq!(classify_feedback("set no_cache = true"), FeedbackType::General);
+        assert_eq!(classify_feedback("it's a no-op here"), FeedbackType::General);
         // F1: single-char CJK keyword "对" needs non-word neighbors.
         assert_eq!(classify_feedback("针对这个再查一下"), FeedbackType::General);
         assert_eq!(classify_feedback("对，就是这个"), FeedbackType::Confirm);

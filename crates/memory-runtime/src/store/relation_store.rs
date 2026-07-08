@@ -8,7 +8,7 @@ use chrono::Utc;
 use rusqlite::{params, Connection, Row};
 
 use crate::confidence::EvidenceType;
-use crate::error::MemoryResult;
+use crate::error::{MemoryError, MemoryResult};
 use crate::models::hierarchy::RelationType;
 use crate::models::relation::{canonical_pair, ConceptRelation, RelationLifecycle};
 
@@ -92,6 +92,15 @@ impl RelationStore for SqliteRelationStore {
         evidence: &EvidenceType,
     ) -> MemoryResult<ConceptRelation> {
         let (src, dst) = canonical_pair(src_concept_id, dst_concept_id, relation_type);
+        // A concept cannot relate to itself: a self-loop would make a concept
+        // its own neighbor and inflate its connection_count. LinkEngine already
+        // skips these, but the store rejects them too (defense in depth) — the
+        // FK cannot catch it because the endpoint concept genuinely exists.
+        if src == dst {
+            return Err(MemoryError::SelfLoopRelation {
+                concept_id: src.to_string(),
+            });
+        }
         let now = Utc::now().to_rfc3339();
         let conn = self.conn.lock();
         // One transaction: insert + connection_count bump + evidence update must
@@ -369,6 +378,26 @@ mod tests {
         );
         assert!(err.is_err(), "edge to a ghost concept must fail the FK");
         assert!(relations.list_by_workspace("ws").unwrap().is_empty());
+    }
+
+    #[test]
+    fn self_loop_is_rejected() {
+        // A concept relating to itself is never a real edge; the store rejects
+        // it rather than creating a row where src == dst.
+        let (_db, relations, concepts) = store();
+        seed(&concepts, &["c-a"]);
+
+        let err = relations.record_evidence(
+            "ws",
+            "c-a",
+            "c-a",
+            RelationType::Causal,
+            &EvidenceType::FileEvidence,
+        );
+        assert!(matches!(err, Err(MemoryError::SelfLoopRelation { .. })));
+        assert!(relations.list_by_workspace("ws").unwrap().is_empty());
+        // connection_count must not have been bumped by the aborted call.
+        assert_eq!(concepts.get_concept("c-a").unwrap().unwrap().connection_count, 0);
     }
 
     #[test]

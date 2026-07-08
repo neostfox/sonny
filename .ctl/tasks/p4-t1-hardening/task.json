@@ -1,0 +1,29 @@
+{
+  "gates": [
+    "cargo_check",
+    "cargo_test"
+  ],
+  "id": "p4-t1-hardening",
+  "is_archived": false,
+  "is_held": false,
+  "last_event_seq": 4,
+  "objective": "T1 独立硬化：src==dst 自环 store 层拒绝；AssistantSpeculation 零权重证据不再 evidence_count+=1；embedding 孤儿 recency=1.0 加注释；keyword_hit 将 _/- 视为词字符修 no_cache/no-op 误判 Negate",
+  "phase": "review",
+  "read_scope": [
+    "crates/memory-runtime/src/error.rs",
+    "crates/memory-runtime/src/feedback/mod.rs",
+    "crates/memory-runtime/src/models/relation.rs",
+    "crates/memory-runtime/src/recall/mod.rs",
+    "crates/memory-runtime/src/store/relation_store.rs"
+  ],
+  "risk_triggers": [],
+  "schema": "control.task-view.v1",
+  "write_allow": [
+    "crates/memory-runtime/src/error.rs",
+    "crates/memory-runtime/src/feedback/mod.rs",
+    "crates/memory-runtime/src/models/relation.rs",
+    "crates/memory-runtime/src/recall/mod.rs",
+    "crates/memory-runtime/src/store/relation_store.rs"
+  ],
+  "write_deny": []
+}

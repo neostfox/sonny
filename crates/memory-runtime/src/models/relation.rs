@@ -114,10 +114,18 @@ impl ConceptRelation {
     pub fn add_evidence(&mut self, evidence: &EvidenceType, now: &str) {
         let mut posterior = BetaConfidence::with_values(self.evidence_alpha, self.evidence_beta);
         posterior.update(evidence);
+        // Zero-weight evidence (e.g. AssistantSpeculation) shifts neither α nor
+        // β; counting it would still push evidence_count toward the Validated
+        // threshold without any real support behind the edge. Only weighted
+        // evidence advances the counter and the recency clock.
+        let contributed =
+            posterior.alpha != self.evidence_alpha || posterior.beta != self.evidence_beta;
         self.evidence_alpha = posterior.alpha;
         self.evidence_beta = posterior.beta;
-        self.evidence_count += 1;
-        self.last_evidence_at = Some(now.to_string());
+        if contributed {
+            self.evidence_count += 1;
+            self.last_evidence_at = Some(now.to_string());
+        }
         self.updated_at = now.to_string();
         self.promote(evidence);
     }
@@ -197,6 +205,27 @@ mod tests {
             e.add_evidence(&EvidenceType::RepeatedOccurrence, &format!("t{}", 4 + i));
         }
         assert_eq!(e.lifecycle, RelationLifecycle::Validated);
+    }
+
+    #[test]
+    fn zero_weight_evidence_does_not_advance_the_counter() {
+        // AssistantSpeculation carries (0, 0): it must not inflate evidence_count
+        // toward the Validated threshold nor move the recency clock.
+        let mut e = edge(RelationType::SharedEntity);
+        e.add_evidence(&EvidenceType::AssistantSpeculation, "t1");
+        assert_eq!(e.evidence_count, 0);
+        assert_eq!(e.last_evidence_at, None);
+        assert!((e.weight() - 0.5).abs() < 1e-9);
+        assert_eq!(e.lifecycle, RelationLifecycle::Candidate);
+
+        // Three speculations still cannot reach Validated (which needs 3 real
+        // pieces of evidence); one real occurrence is the first that counts.
+        e.add_evidence(&EvidenceType::AssistantSpeculation, "t2");
+        e.add_evidence(&EvidenceType::AssistantSpeculation, "t3");
+        assert_eq!(e.evidence_count, 0);
+        e.add_evidence(&EvidenceType::RepeatedOccurrence, "t4");
+        assert_eq!(e.evidence_count, 1);
+        assert_eq!(e.last_evidence_at.as_deref(), Some("t4"));
     }
 
     #[test]

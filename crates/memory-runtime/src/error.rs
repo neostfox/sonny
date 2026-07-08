@@ -46,6 +46,9 @@ pub enum MemoryError {
 
     #[error("Recall produced no results for workspace {workspace}")]
     EmptyRecall { workspace: String },
+
+    #[error("Self-loop relation rejected: concept {concept_id} cannot relate to itself")]
+    SelfLoopRelation { concept_id: String },
 }
 
 pub type MemoryResult<T> = Result<T, MemoryError>;

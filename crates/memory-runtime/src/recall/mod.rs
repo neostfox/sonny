@@ -137,6 +137,10 @@ where
         for mut score in scores.into_values() {
             score.recency = match self.concepts.get_concept(&score.concept_id)? {
                 Some(concept) => concept_recency(&concept, self.decay_half_life_days, now),
+                // Embedding orphan: a vector whose concept row is gone (deleted
+                // or not yet written). With no last_recalled_at to decay from,
+                // fall back to a neutral 1.0 rather than dropping the channel
+                // score — recency only ever attenuates, never invents salience.
                 None => 1.0,
             };
             score.score = (score.semantic_score * SEMANTIC_WEIGHT

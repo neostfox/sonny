@@ -10,6 +10,7 @@ use crate::models::embedding::EmbeddingSourceType;
 use crate::models::recall::{Intent, MemoryContext, RecallBudget, RecallScore};
 use crate::models::status::ConceptStatus;
 use crate::store::traits::{ConceptStore, EmbeddingStore};
+use crate::text::keyword_hit;
 
 const DEFAULT_MAX_TOKENS: usize = 1500;
 const SEMANTIC_WEIGHT: f64 = 0.6;
@@ -112,7 +113,9 @@ where
             }
         }
 
-        let query_entities = extract_query_entities(query);
+        let vocabulary: BTreeSet<String> =
+            self.concepts.list_entities(workspace_id)?.into_iter().collect();
+        let query_entities = extract_query_entities(query, &vocabulary);
         if !query_entities.is_empty() {
             for concept in self
                 .concepts
@@ -283,7 +286,10 @@ pub fn classify_intent(query: &str) -> Intent {
 
     let lower = query.to_lowercase();
     for (intent, keywords) in TEMPLATES {
-        if keywords.iter().any(|keyword| lower.contains(keyword)) {
+        // Boundary-aware, not raw substring: an ASCII keyword like "next" must
+        // not match inside "context"; CJK keywords still match without a
+        // delimiter (keyword_hit handles both).
+        if keywords.iter().any(|keyword| keyword_hit(&lower, keyword)) {
             return intent.clone();
         }
     }
@@ -418,19 +424,65 @@ pub fn estimate_tokens(text: &str) -> usize {
     text.chars().count().div_ceil(4).max(1)
 }
 
-fn extract_query_entities(query: &str) -> Vec<String> {
+/// Extract candidate entity keys from a query. Segments are split on
+/// punctuation/whitespace; a space-less CJK run (which the split leaves whole,
+/// since CJK has no delimiter) is segmented against the known-entity
+/// `vocabulary` by forward maximum-matching (T6) — so "确认POSMASK有没有机器字段"
+/// yields the known entities `posmask` and `机器字段`, not one unmatchable blob.
+/// Only entities present in the vocabulary can match a concept anyway; a novel
+/// (unknown) token is kept whole so a not-yet-stored entity still surfaces if it
+/// later gains a concept.
+fn extract_query_entities(query: &str, vocabulary: &BTreeSet<String>) -> Vec<String> {
     let mut entities = Vec::new();
     for raw in query
         .split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '-' || c as u32 > 0x7f))
         .filter(|part| part.chars().count() >= 2)
     {
         let key = canonical_key_light(raw);
-        if !key.is_empty() && !is_stopword(&key) {
+        if key.is_empty() || is_stopword(&key) {
+            continue;
+        }
+        if vocabulary.contains(&key) || key.is_ascii() {
+            // Known as a whole, or a novel ASCII token (no dictionary can split
+            // it) — keep it whole, preserving pre-T6 behavior.
             entities.push(key);
+        } else {
+            // A CJK/mixed run not known as a whole: segment it against the
+            // vocabulary. If nothing matches, keep the whole run (no regression).
+            let segmented = segment_by_vocabulary(&key, vocabulary);
+            if segmented.is_empty() {
+                entities.push(key);
+            } else {
+                entities.extend(segmented);
+            }
         }
     }
     dedup(&mut entities);
     entities
+}
+
+/// Forward maximum-matching: walk `text` left to right, at each position
+/// consuming the longest vocabulary key (≥ 2 chars) that is a prefix of the
+/// remainder, otherwise skipping one character. Handles CJK/Latin transitions
+/// naturally since a matched entity is consumed whole.
+fn segment_by_vocabulary(text: &str, vocabulary: &BTreeSet<String>) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut i = 0; // byte offset, always on a char boundary
+    while i < text.len() {
+        let rest = &text[i..];
+        let best = vocabulary
+            .iter()
+            .filter(|k| k.chars().count() >= 2 && rest.starts_with(k.as_str()))
+            .max_by_key(|k| k.len());
+        match best {
+            Some(k) => {
+                out.push(k.clone());
+                i += k.len();
+            }
+            None => i += rest.chars().next().map_or(1, char::len_utf8),
+        }
+    }
+    out
 }
 
 fn is_stopword(key: &str) -> bool {
@@ -758,12 +810,58 @@ mod tests {
 
     #[test]
     fn query_entity_extraction_normalizes_and_deduplicates() {
-        let entities = extract_query_entities("确认 POSMASK posmask 有没有 机器字段");
+        // Space-delimited: unchanged from pre-T6 (empty vocabulary ⇒ each token
+        // kept whole; intent words are dropped as stopwords).
+        let entities = extract_query_entities(
+            "确认 POSMASK posmask 有没有 机器字段",
+            &BTreeSet::new(),
+        );
 
         assert_eq!(
             entities,
             vec!["posmask".to_string(), "机器字段".to_string()]
         );
+    }
+
+    #[test]
+    fn cjk_query_is_segmented_against_known_entities() {
+        // No delimiters: the whole run is one token under the splitter. Forward
+        // maximum-matching against the vocabulary recovers the known entities
+        // and leaves the intent words (确认/有没有) unmatched → dropped.
+        let vocab: BTreeSet<String> = ["posmask", "机器字段", "订单表"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+
+        let entities = extract_query_entities("确认POSMASK有没有机器字段", &vocab);
+
+        assert!(entities.contains(&"posmask".to_string()));
+        assert!(entities.contains(&"机器字段".to_string()));
+        assert!(!entities.contains(&"订单表".to_string())); // not mentioned
+        // No unmatchable blob leaked through.
+        assert!(!entities.iter().any(|e| e.contains("确认")));
+    }
+
+    #[test]
+    fn unknown_cjk_run_is_kept_whole_when_vocabulary_misses() {
+        // No vocabulary match ⇒ no regression: the run is preserved whole rather
+        // than dropped, so a not-yet-stored entity can still surface later.
+        let entities = extract_query_entities("陌生词组", &BTreeSet::new());
+        assert_eq!(entities, vec!["陌生词组".to_string()]);
+    }
+
+    #[test]
+    fn classify_intent_matches_on_word_boundaries() {
+        // T6a: ASCII intent keyword must not match inside a larger word —
+        // "and" ⊂ "candidate" no longer misfires AddKnowledge.
+        assert_eq!(
+            classify_intent("update the candidate list"),
+            Intent::GeneralQuery
+        );
+        // Whole-word ASCII keyword still matches.
+        assert_eq!(classify_intent("please also note this"), Intent::AddKnowledge);
+        // CJK intent keywords still match without a delimiter.
+        assert_eq!(classify_intent("确认一下这个字段"), Intent::VerifyFact);
     }
 
     #[test]

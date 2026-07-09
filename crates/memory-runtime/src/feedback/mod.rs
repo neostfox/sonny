@@ -37,6 +37,7 @@ use crate::store::observation_store::{
     get_observation_conn, insert_observation, supersede_observation_conn,
     update_observation_confidence_conn,
 };
+use crate::text::keyword_hit;
 
 /// Below this confidence a revised concept is deprecated (quality-control.md
 /// §Confidence Status After Revision).
@@ -291,30 +292,6 @@ pub fn classify_feedback(text: &str) -> FeedbackType {
         }
     }
     FeedbackType::General
-}
-
-/// Boundary-aware keyword test on lowercased text.
-fn keyword_hit(text: &str, keyword: &str) -> bool {
-    let needs_boundary = keyword.is_ascii() || keyword.chars().count() == 1;
-    if !needs_boundary {
-        return text.contains(keyword);
-    }
-    text.match_indices(keyword).any(|(start, _)| {
-        let before_is_word = text[..start].chars().next_back().is_some_and(is_word_char);
-        let after_is_word = text[start + keyword.len()..]
-            .chars()
-            .next()
-            .is_some_and(is_word_char);
-        !before_is_word && !after_is_word
-    })
-}
-
-/// Word character for keyword-boundary purposes. `_` and `-` are treated as
-/// word characters (not delimiters) so identifier-like tokens don't split into
-/// keywords: without this, "no" would negate inside "no_cache"/"no-op" because
-/// `_`/`-` are not alphanumeric.
-fn is_word_char(c: char) -> bool {
-    c.is_alphanumeric() || c == '_' || c == '-'
 }
 
 /// Status transition after revision (quality-control.md, adapted to the code's

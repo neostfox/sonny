@@ -81,6 +81,10 @@ pub trait ConceptStore: Send + Sync {
         entities: &[String],
         workspace_id: &str,
     ) -> MemoryResult<Vec<Concept>>;
+    /// T6: the workspace's known canonical entity keys (from `entity_concept`).
+    /// Used as the dictionary for CJK query segmentation in recall — only
+    /// entities that exist as concept entities can match anyway.
+    fn list_entities(&self, workspace_id: &str) -> MemoryResult<Vec<String>>;
     /// P4-B: record a recall *attempt* — bumps `recall_count` and resets the
     /// forgetting clock (`last_recalled_at`). Success/failure is deliberately NOT
     /// decided here; it arrives later via explicit feedback

@@ -228,6 +228,16 @@ impl ConceptStore for SqliteConceptStore {
         Ok(rows)
     }
 
+    fn list_entities(&self, workspace_id: &str) -> MemoryResult<Vec<String>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn
+            .prepare("SELECT DISTINCT entity FROM entity_concept WHERE workspace_id = ?1")?;
+        let rows = stmt
+            .query_map(params![workspace_id], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
     fn record_recall(&self, concept_id: &str) -> MemoryResult<()> {
         let conn = self.conn.lock();
         let now = chrono::Utc::now().to_rfc3339();

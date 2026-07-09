@@ -9,3 +9,4 @@ pub mod models;
 pub mod pipeline;
 pub mod recall;
 pub mod store;
+pub mod text;

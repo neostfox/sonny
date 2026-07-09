@@ -53,6 +53,16 @@ fn entity_recall(
 
 **Weight**: 40% of final score.
 
+**Candidate cap (T3)**: `find_by_entities` is bounded to the top
+`ENTITY_CANDIDATE_LIMIT` (= 20) owners **by confidence** (`ORDER BY confidence
+DESC LIMIT 20`), so a hot entity (e.g. `user`) owned by hundreds of concepts
+no longer amplifies reads. **Known limitation**: the cap ranks by confidence,
+but this channel scores by *overlap* — a low-confidence concept with high entity
+overlap can be cut before it is scored when a single hot entity has >20 owners.
+Accepted tradeoff (read-amplification bound favored over exhaustive overlap).
+The truncation is surfaced via `tracing::debug` when the cap is hit, not dropped
+silently.
+
 ### Merged Score
 
 ```rust

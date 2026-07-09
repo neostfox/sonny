@@ -215,7 +215,17 @@ impl ConceptStore for SqliteConceptStore {
                 .into_iter()
                 .chain(entities.iter().map(String::as_str)),
         );
-        map_rows(&conn, &sql, params, row_to_concept)
+        let rows = map_rows(&conn, &sql, params, row_to_concept)?;
+        // Surface the cap rather than dropping silently: at the limit, lower-
+        // confidence (possibly higher-overlap) owners of a hot entity were cut.
+        if rows.len() == ENTITY_CANDIDATE_LIMIT {
+            tracing::debug!(
+                limit = ENTITY_CANDIDATE_LIMIT,
+                entities = entities.len(),
+                "find_by_entities hit the candidate cap; lower-confidence owners dropped"
+            );
+        }
+        Ok(rows)
     }
 
     fn record_recall(&self, concept_id: &str) -> MemoryResult<()> {
@@ -488,6 +498,31 @@ mod tests {
         assert_eq!(hits.len(), ENTITY_CANDIDATE_LIMIT);
         // The lowest-confidence concepts (c00..c04) must have been dropped.
         assert!(hits.iter().all(|c| c.confidence >= 0.5 + 5.0 / 1000.0));
+    }
+
+    #[test]
+    fn find_by_entities_dedups_multi_entity_owner_under_cap() {
+        let db = Database::open_in_memory().unwrap();
+        let store = SqliteConceptStore::new(db.conn.clone());
+
+        // Enough single-entity owners to exceed the cap, plus one concept owning
+        // BOTH queried entities (two JOIN rows) at high confidence. DISTINCT must
+        // collapse it to one row, and LIMIT must apply after the dedup+order.
+        for i in 0..(ENTITY_CANDIDATE_LIMIT + 5) {
+            let mut c = make_concept(&format!("c{i:02}"), "ws", &["hot"]);
+            c.confidence = 0.5 + (i as f64) / 1000.0;
+            store.insert_concept(&c).unwrap();
+        }
+        let mut dual = make_concept("dual", "ws", &["hot", "rare"]);
+        dual.confidence = 0.99; // highest, so it survives the cap
+        store.insert_concept(&dual).unwrap();
+
+        let hits = store
+            .find_by_entities(&["hot".to_string(), "rare".to_string()], "ws")
+            .unwrap();
+        assert_eq!(hits.len(), ENTITY_CANDIDATE_LIMIT);
+        // The dual-entity owner appears exactly once despite matching both.
+        assert_eq!(hits.iter().filter(|c| c.concept_id == "dual").count(), 1);
     }
 
     #[test]

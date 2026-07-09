@@ -4,11 +4,11 @@
     "cargo_test"
   ],
   "id": "p4-t4-spec-decisions",
-  "is_archived": false,
+  "is_archived": true,
   "is_held": false,
-  "last_event_seq": 4,
+  "last_event_seq": 11,
   "objective": "T4 spec 决策落地：①衰减常数正名 e-folding τ（非半衰期，行为不变，仅文档/注释）②Labile 静默存活改完全中性（去掉 α+=0.1，解决 OPEN QUESTION）③UserConfirm→导出边 Confirmed 传导认定有意并写明 spec",
-  "phase": "review",
+  "phase": "completed",
   "read_scope": [
     "crates/memory-runtime/src/recall/mod.rs"
   ],

@@ -113,8 +113,15 @@ where
             }
         }
 
-        let vocabulary: BTreeSet<String> =
-            self.concepts.list_entities(workspace_id)?.into_iter().collect();
+        // The vocabulary is only consulted to segment non-ASCII (CJK) runs; a
+        // pure-ASCII query keeps every token whole regardless, so skip the load
+        // entirely for it (avoids a per-query entity_concept scan on the common
+        // English path).
+        let vocabulary: BTreeSet<String> = if query.chars().any(|c| !c.is_ascii()) {
+            self.concepts.list_entities(workspace_id)?.into_iter().collect()
+        } else {
+            BTreeSet::new()
+        };
         let query_entities = extract_query_entities(query, &vocabulary);
         if !query_entities.is_empty() {
             for concept in self
@@ -286,9 +293,14 @@ pub fn classify_intent(query: &str) -> Intent {
 
     let lower = query.to_lowercase();
     for (intent, keywords) in TEMPLATES {
-        // Boundary-aware, not raw substring: an ASCII keyword like "next" must
-        // not match inside "context"; CJK keywords still match without a
-        // delimiter (keyword_hit handles both).
+        // Boundary-aware, not raw substring: an ASCII keyword like "and" must
+        // not match inside "candidate"; CJK keywords still match without a
+        // delimiter (keyword_hit handles both). Tradeoff (T6a): word-boundary
+        // matching also stops matching inflected forms ("confirmed"/"checking"
+        // no longer hit "confirm"/"check") — accepted, since intent is a
+        // low-stakes budget hint that safely falls back to GeneralQuery, and
+        // killing the false positives is the higher-value fix. A real stemmer
+        // would be needed to recover inflections without reintroducing them.
         if keywords.iter().any(|keyword| keyword_hit(&lower, keyword)) {
             return intent.clone();
         }

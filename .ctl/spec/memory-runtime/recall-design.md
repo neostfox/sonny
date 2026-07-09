@@ -53,6 +53,22 @@ fn entity_recall(
 
 **Weight**: 40% of final score.
 
+**CJK query segmentation (T6)**: query entities are extracted by splitting on
+punctuation/whitespace, then a space-less CJK run — which the splitter leaves
+whole, since Chinese has no delimiter — is segmented against the workspace's
+known entities (`ConceptStore::list_entities`, the `entity_concept` dictionary)
+by **forward maximum-matching**: walk left to right, consume the longest known
+entity that is a prefix of the remainder, else skip a character. So
+`确认POSMASK有没有机器字段` yields `posmask` + `机器字段`, not one unmatchable blob.
+Only entities that exist as concept entities can match anyway, so the dictionary
+is exactly the right vocabulary. A novel/unknown run is kept whole (no
+regression). The vocabulary is loaded only for queries containing non-ASCII
+characters. **Known limitation**: a genuinely novel CJK compound that
+*contains* a known entity is split (`机器学习` → `机器` if only `机器` is known) —
+accepted, the semantic channel is the safety net. Intent keyword matching
+(`classify_intent`) is likewise boundary-aware (T6a), which trades English
+inflection tolerance for killing mid-word false matches.
+
 **Candidate cap (T3)**: `find_by_entities` is bounded to the top
 `ENTITY_CANDIDATE_LIMIT` (= 20) owners **by confidence** (`ORDER BY confidence
 DESC LIMIT 20`), so a hot entity (e.g. `user`) owned by hundreds of concepts

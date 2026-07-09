@@ -50,8 +50,9 @@ where
         }
     }
 
-    /// Override the base forgetting half-life (wire from
-    /// `ConfidenceConfig::decay_half_life_days` when constructing from settings).
+    /// Override the base forgetting time constant τ (the `decay_half_life_days`
+    /// misnomer; wire from `ConfidenceConfig::decay_half_life_days` when
+    /// constructing from settings).
     pub fn with_decay_half_life(mut self, days: f64) -> Self {
         self.decay_half_life_days = days;
         self

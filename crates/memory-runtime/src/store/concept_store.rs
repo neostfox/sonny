@@ -20,6 +20,10 @@ impl SqliteConceptStore {
     }
 }
 
+/// Max concepts returned by `find_by_entities` — bounds hot-entity read
+/// amplification; the recall entity channel keeps only the top handful anyway.
+const ENTITY_CANDIDATE_LIMIT: usize = 20;
+
 const CANDIDATE_COLUMNS: &str = "\
     candidate_id, workspace_id, name, summary, source_terms_json, source_sessions_json, \
     source_observations_json, known_facts_json, rejected_hypotheses_json, open_questions_json, \
@@ -194,11 +198,15 @@ impl ConceptStore for SqliteConceptStore {
             (0..entities.len()).map(|i| format!("?{}", i + 3)).collect();
         // Exact-match JOIN replaces substring LIKE on related_entities_json,
         // so searching "user" no longer matches "user_profile" (C2).
+        // Bounded by confidence: a hot entity (e.g. "user") owned by hundreds of
+        // concepts would otherwise return them all, amplifying reads. The top
+        // ENTITY_CANDIDATE_LIMIT highest-confidence owners are enough for the
+        // recall entity channel (which itself keeps only the top handful).
         let sql = format!(
             "SELECT DISTINCT {cols} FROM concept c \
              JOIN entity_concept ec ON ec.concept_id = c.concept_id \
              WHERE c.workspace_id = ?1 AND c.status = ?2 AND ec.entity IN ({}) \
-             ORDER BY c.confidence DESC",
+             ORDER BY c.confidence DESC LIMIT {ENTITY_CANDIDATE_LIMIT}",
             placeholders.join(", ")
         );
         let active = ConceptStatus::Active.as_str();
@@ -460,6 +468,26 @@ mod tests {
             .unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].concept_id, "c1");
+    }
+
+    #[test]
+    fn find_by_entities_caps_at_limit_keeping_highest_confidence() {
+        let db = Database::open_in_memory().unwrap();
+        let store = SqliteConceptStore::new(db.conn.clone());
+
+        // A hot entity shared by more concepts than the cap; confidence ascends
+        // with index so the highest-index concepts are the highest-confidence.
+        let total = ENTITY_CANDIDATE_LIMIT + 5;
+        for i in 0..total {
+            let mut c = make_concept(&format!("c{i:02}"), "ws", &["hot"]);
+            c.confidence = 0.5 + (i as f64) / 1000.0;
+            store.insert_concept(&c).unwrap();
+        }
+
+        let hits = store.find_by_entities(&["hot".to_string()], "ws").unwrap();
+        assert_eq!(hits.len(), ENTITY_CANDIDATE_LIMIT);
+        // The lowest-confidence concepts (c00..c04) must have been dropped.
+        assert!(hits.iter().all(|c| c.confidence >= 0.5 + 5.0 / 1000.0));
     }
 
     #[test]

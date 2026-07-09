@@ -1,0 +1,23 @@
+{
+  "gates": [
+    "cargo_check",
+    "cargo_test"
+  ],
+  "id": "p4-t3-resource-caps",
+  "is_archived": false,
+  "is_held": false,
+  "last_event_seq": 4,
+  "objective": "T3 资源上限：find_by_entities 加 SQL LIMIT 20（按 confidence DESC）限热实体读放大；LinkEngine shared_entity 回填对 owners>8 的实体跳过（避免 K(K-1)/2 边爆炸，且无处不在的实体非 pairwise 相关证据）",
+  "phase": "review",
+  "read_scope": [
+    "crates/memory-runtime/src/pipeline/link.rs",
+    "crates/memory-runtime/src/store/concept_store.rs"
+  ],
+  "risk_triggers": [],
+  "schema": "control.task-view.v1",
+  "write_allow": [
+    "crates/memory-runtime/src/pipeline/link.rs",
+    "crates/memory-runtime/src/store/concept_store.rs"
+  ],
+  "write_deny": []
+}

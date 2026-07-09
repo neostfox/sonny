@@ -5,7 +5,11 @@
 //!
 //! 1. Shared entities — two concepts referencing the same canonical entity get
 //!    a symmetric `shared_entity` edge; one evidence increment per shared
-//!    entity.
+//!    entity. Ubiquitous entities (owned by more than
+//!    `MAX_SHARED_ENTITY_OWNERS` concepts) are skipped: they would emit a
+//!    quadratic K(K-1)/2 burst of edges, and an entity shared that widely is
+//!    not evidence that any particular pair of concepts is related. Skips are
+//!    counted in `LinkReport.shared_entity_skipped`, never dropped silently.
 //! 2. Coclaim batches — observations extracted in one batch whose subjects
 //!    belong to different concepts link those concepts with a symmetric
 //!    `shared_session` edge; one increment per batch per pair.
@@ -27,6 +31,11 @@ use crate::models::observation::Observation;
 use crate::models::status::{ConceptStatus, ObservationStatus};
 use crate::store::traits::{ConceptStore, ObservationStore, RelationStore};
 
+/// An entity owned by more than this many concepts is too ubiquitous to be
+/// pairwise-relatedness evidence; its `shared_entity` backfill is skipped to
+/// avoid a quadratic K(K-1)/2 edge burst.
+const MAX_SHARED_ENTITY_OWNERS: usize = 8;
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LinkReport {
     /// Evidence increments applied to directed causal edges.
@@ -35,6 +44,9 @@ pub struct LinkReport {
     pub shared_entity_evidence: usize,
     /// Evidence increments applied to coclaim (shared-session) edges.
     pub coclaim_evidence: usize,
+    /// Ubiquitous entities skipped for shared-entity backfill (owners >
+    /// `MAX_SHARED_ENTITY_OWNERS`). Surfaced so the cap is never a silent drop.
+    pub shared_entity_skipped: usize,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -71,8 +83,14 @@ impl LinkEngine {
             }
         }
 
-        // 1. Shared entities → symmetric shared_entity edges.
+        // 1. Shared entities → symmetric shared_entity edges. Skip ubiquitous
+        // entities (owners > MAX_SHARED_ENTITY_OWNERS): quadratic edge burst,
+        // and wide sharing is not pairwise-relatedness evidence.
         for owners in entity_index.values() {
+            if owners.len() > MAX_SHARED_ENTITY_OWNERS {
+                report.shared_entity_skipped += 1;
+                continue;
+            }
             for (a, b) in unordered_pairs(owners) {
                 relations.record_evidence(
                     workspace_id,
@@ -367,6 +385,45 @@ mod tests {
         assert_eq!(edges.len(), 1);
         assert_eq!(edges[0].relation_type, RelationType::SharedEntity);
         assert_eq!(edges[0].evidence_count, 2);
+    }
+
+    #[test]
+    fn ubiquitous_entity_is_skipped_not_quadratically_expanded() {
+        let f = fixture();
+        // 9 concepts all sharing one entity → owners = 9 > MAX_SHARED_ENTITY_OWNERS.
+        // Without the cap this would emit 9*8/2 = 36 shared_entity edges.
+        for i in 0..(MAX_SHARED_ENTITY_OWNERS + 1) {
+            f.concepts
+                .insert_concept(&concept(&format!("c-{i}"), &["hot-entity"]))
+                .unwrap();
+        }
+
+        let report = LinkEngine::new()
+            .link_workspace("ws", &f.concepts, &f.observations, &f.relations)
+            .unwrap();
+
+        assert_eq!(report.shared_entity_evidence, 0);
+        assert_eq!(report.shared_entity_skipped, 1);
+        assert!(f.relations.list_by_workspace("ws").unwrap().is_empty());
+    }
+
+    #[test]
+    fn entity_at_owner_cap_still_links() {
+        let f = fixture();
+        // Exactly MAX_SHARED_ENTITY_OWNERS owners is within the cap → full backfill.
+        for i in 0..MAX_SHARED_ENTITY_OWNERS {
+            f.concepts
+                .insert_concept(&concept(&format!("c-{i}"), &["shared"]))
+                .unwrap();
+        }
+
+        let report = LinkEngine::new()
+            .link_workspace("ws", &f.concepts, &f.observations, &f.relations)
+            .unwrap();
+
+        let n = MAX_SHARED_ENTITY_OWNERS;
+        assert_eq!(report.shared_entity_skipped, 0);
+        assert_eq!(report.shared_entity_evidence, n * (n - 1) / 2);
     }
 
     #[test]

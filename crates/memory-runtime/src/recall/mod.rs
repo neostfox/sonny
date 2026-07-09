@@ -16,7 +16,9 @@ const SEMANTIC_WEIGHT: f64 = 0.6;
 const ENTITY_WEIGHT: f64 = 0.4;
 const SEMANTIC_TOP_K: usize = 10;
 const SEMANTIC_THRESHOLD: f32 = 0.0;
-/// P4-C: base forgetting half-life (mirrors `ConfidenceConfig::decay_half_life_days`).
+/// P4-C: base forgetting time constant τ (the *e-folding* time, not a half-life:
+/// recency = e⁻¹ ≈ 0.368 at t = τ). The `half_life` naming is a retained
+/// misnomer; mirrors `ConfidenceConfig::decay_half_life_days`.
 const DEFAULT_DECAY_HALF_LIFE_DAYS: f64 = 90.0;
 /// P4-C: each successful recall slows forgetting by this factor (spacing effect).
 const REHEARSAL_DECELERATION: f64 = 0.5;
@@ -183,6 +185,9 @@ where
 /// `recency = exp(−λ_eff·Δt)` where
 /// `λ_eff = (1 / half_life_days) / (1 + REHEARSAL_DECELERATION · successful_recall_count)`
 /// and Δt is days since `anchor` (clamped at 0 for future timestamps).
+///
+/// `half_life_days` is really the *e-folding time constant* τ (a misnomer kept on
+/// the identifier): at Δt = τ with no rehearsal, recency = e⁻¹ ≈ 0.368, not 0.5.
 ///
 /// Opaque or missing anchors yield 1.0 — legacy rows without parseable
 /// timestamps are not penalized, they just don't decay.

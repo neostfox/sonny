@@ -41,7 +41,7 @@ Evidence drives `fact_confidence` via α/β updates. Time is **not** evidence �
 | Cross ≥3 sessions consistent | +2.0 | | Auto-confirmation level |
 | Cross 2 sessions consistent | +1.0 | | Strong signal |
 | Human review confirm | +2.0 | | Strong positive |
-| Recall not corrected by user | +0.3 | | Implicit positive |
+| Recall not corrected by user | +0.3 | | Implicit positive — **declared but deliberately unwired** (see below) |
 | User negation | | +3.0 | Strong negative |
 | New conflicting evidence | | +2.0 | Medium negative |
 | Recall corrected by user | | +1.5 | Implicit negative |
@@ -49,6 +49,10 @@ Evidence drives `fact_confidence` via α/β updates. Time is **not** evidence �
 | Assistant speculation only | +0 | | No alpha boost |
 
 12 evidence types — matches `EvidenceType` enum and `EVIDENCE_TYPE_VARIANT_COUNT` in `confidence/mod.rs`.
+
+**`RecallNotCorrected` (+0.3) is deliberately not applied** (P4-B follow-up): the enum variant and its weight exist, but no code path invokes it (only a unit test does). It encodes "an uncorrected recall is a weak positive" — the same retrieval-strengthens-without-validation defect the P4-B closed loop removed, and the same reason silent survival is now neutral (§Reconsolidation). It is kept in the table for provenance completeness but must stay unwired; wiring it would reintroduce rehearsal positive-feedback.
+
+**Evidence propagates from observation to induced edge (P4-B follow-up decision — intentional)**: when LinkEngine derives a `concept_relation` edge from a causal observation, the observation's provenance seeds the edge's evidence. A `UserConfirm`-sourced causal observation therefore promotes the induced edge straight to `Confirmed` in one step (via `UserConfirmation`, +2.0). This is *transitive* — the user confirmed the **observation** ("A causes B"), and that endorsement is propagated to the **edge** (A→B), which the user never confirmed directly. This is intended: confirming the causal claim is endorsement of the causal edge it induces. The transitivity is fixated by LinkEngine tests. (Note the asymmetry with silent survival above: an *explicit* confirmation propagates, but *silence* never does.)
 
 ### Implementation (f64)
 
@@ -100,7 +104,7 @@ fn compute_vitality(concept: &Concept) -> f64 {
     //    Successful recall slows forgetting: λ shrinks as successful_recall_count grows.
     let anchor = concept.last_recalled_at.or(concept.created_at);
     let days = days_since(&anchor);
-    let lambda_base = 1.0 / 90.0; // ~90-day base half-life
+    let lambda_base = 1.0 / 90.0; // τ = 90-day e-folding time constant (NOT a half-life: recency = e⁻¹ ≈ 0.368 at t = τ)
     let lambda_eff = lambda_base / (1.0 + 0.5 * concept.successful_recall_count as f64);
     let time_decay = (-(lambda_eff) * days).exp();
 
@@ -164,6 +168,7 @@ recency = exp(−λ_eff · Δt)                               // ∈ (0, 1]
 - Recall **resets the forgetting clock** (`last_recalled_at`, via `record_recall`), but only a recall the user *validated* slows future decay: `successful_recall_count` is incremented by `record_recall_outcome(true)` from explicit positive feedback (P4-B), never by retrieval itself. This is the spacing effect without the rehearsal positive-feedback defect (a hot-but-wrong concept no longer strengthens just by being retrieved).
 - Never-recalled concepts anchor Δt to `created_at`; combined with the `success_rate = 0.5` prior in vitality, a brand-new concept starts near the middle and ages out if never touched.
 - Config knob: `ConfidenceConfig.decay_half_life_days` (default 90.0) sets `λ_base = 1 / decay_half_life_days`.
+  - **Naming note (P4-B follow-up decision)**: despite the field name, 90 is the *e-folding time constant* τ, **not** a half-life — at `t = τ` recency is `e⁻¹ ≈ 0.368`, not `0.5`. A true half-life would require `λ_base = ln2 / τ`. The `half_life` identifier is a retained misnomer (renaming deferred to avoid churning the config surface); the 90-day value and the decay behavior are deliberate and unchanged.
 
 ### When Decay Runs
 
@@ -269,11 +274,11 @@ fn reconsolidate(concept: &mut Concept) -> Result<(), MemoryError> {
         apply_corrections(concept)?;
         concept.evidence_alpha += 0.3; // reward for successful correction integration
     } else {
-        // Silent survival is NOT a validated recall (P4-B): it does not touch
-        // successful_recall_count, so it neither feeds success_rate nor slows
-        // decay. It still adds a whisper of retrieval-practice evidence (α).
-        // OPEN QUESTION: whether silence should add α at all — see note below.
-        concept.evidence_alpha += 0.1; // retrieval-practice evidence, not a success tally
+        // Silent survival is fully neutral (P4-B follow-up decision): no α, no β,
+        // no successful_recall_count. Silence is absence of evidence, not evidence
+        // of correctness — it must not strengthen the fact in any dimension. The
+        // recall still reset the forgetting clock (record_recall), which is the
+        // only thing retrieval alone is allowed to do.
     }
 
     concept.status = ConceptStatus::Active;
@@ -282,9 +287,7 @@ fn reconsolidate(concept: &mut Concept) -> Result<(), MemoryError> {
 }
 ```
 
-Note: `evidence_alpha += 0.1` on silent survival is a *retrieval-practice* evidence signal (weakly strengthens the fact), distinct from both the *recency* salience factor and the *success tally*. It does **not** increment `successful_recall_count` — silent survival is not a validated recall, so it never feeds `success_rate` or the decay-deceleration term.
-
-> **Open question (P4-B follow-up)**: should silent survival add α at all? `α += 0.1` on silence is the weakest remaining form of "retrieval strengthens without validation" — the same family as the rehearsal positive-feedback the P4-B audit removed elsewhere. It is kept here for now because the Labile window is an explicit correction opportunity (surviving it is a mild signal), but making it fully neutral is a defensible alternative. Decide before the consolidation pass is built.
+**Decision (P4-B follow-up) — silent survival is fully neutral**: surviving the Labile window without correction adds **nothing** — no α, no β, no `successful_recall_count`. It was previously a whisper of retrieval-practice evidence (`α += 0.1`), but that was the weakest remaining form of "retrieval strengthens without validation" — the same family as the rehearsal positive-feedback the P4-B audit removed elsewhere. Consistency won: silence is absence of evidence, so it may not touch the fact's evidence in any dimension. Only explicit feedback (Confirm/Correct/Supplement/Negate) mutates α/β. The recall itself already reset the forgetting clock (`record_recall`); that is the sole effect retrieval alone earns.
 
 ### Labile Window Behavior
 
@@ -294,9 +297,9 @@ Note: `evidence_alpha += 0.1` on silent survival is a *retrieval-practice* evide
 | User corrects | Apply correction, re-consolidate | alpha += 0.3, apply fix, status → active |
 | User supplements | Add entities, re-consolidate | alpha += 0.5, extend concept, status → active |
 | User negates | Create rejected_hypothesis, re-consolidate | beta += 3.0, status → active |
-| Timeout (1h) | Auto re-consolidate | alpha += 0.1 (retrieval-practice evidence; **not** a successful recall), status → active |
+| Timeout (1h) | Auto re-consolidate | **no evidence change** (silence is neutral — no α/β, not a successful recall), status → active |
 
-**Why**: In the brain, recalled memories are rebuilt each time. This creates a natural window for correction. If the concept survives recall without correction, it earns a whisper of retrieval-practice evidence (α += 0.1) — but silence is not validation, so it does **not** count as a successful recall (`successful_recall_count` unchanged) and does not slow decay. Only explicit positive feedback does that (P4-B closed loop).
+**Why**: In the brain, recalled memories are rebuilt each time. This creates a natural window for correction. If the concept survives recall without correction, **nothing** is added — silence is not validation, so it does not count as a successful recall (`successful_recall_count` unchanged), does not slow decay, and does not nudge α. Only explicit positive feedback strengthens the fact (P4-B closed loop); retrieval alone only resets the forgetting clock.
 
 ## Feedback-Driven Revision
 

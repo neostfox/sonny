@@ -4,11 +4,11 @@
     "cargo_test"
   ],
   "id": "p4-t6-cjk-matching",
-  "is_archived": false,
+  "is_archived": true,
   "is_held": false,
-  "last_event_seq": 4,
+  "last_event_seq": 11,
   "objective": "T6 CJK 匹配：(a) classify_intent 关键词从 contains 改边界感知匹配（复用 keyword_hit，抽到共享 crate::text 模块，feedback 一并改用）；(b) extract_query_entities 对无空格 CJK 串按已知实体词表（entity_concept）做最长匹配分词，新增 ConceptStore::list_entities，rank 加载词表并传入",
-  "phase": "review",
+  "phase": "completed",
   "read_scope": [
     "crates/memory-runtime/src/feedback/mod.rs",
     "crates/memory-runtime/src/lib.rs",

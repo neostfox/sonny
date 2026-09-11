@@ -247,6 +247,8 @@ fn build_correction(old: &Observation, feedback_text: &str, now: &str) -> Observ
         observation_detail_json: None,
         extraction_batch_id: None,
         superseded_by: None,
+        cross_project_count: 1,
+        causal_role: old.causal_role.clone(),
         created_at: now.to_string(),
     }
 }
@@ -399,6 +401,8 @@ mod tests {
             successful_recall_count: 0,
             failed_recall_count: 0,
             connection_count: 0,
+            lifecycle_scope: crate::models::scope::LifecycleScope::Project,
+            scope_key: None,
             created_at: "2026-06-01T00:00:00Z".to_string(),
             updated_at: "2026-06-01T00:00:00Z".to_string(),
         }
@@ -426,6 +430,8 @@ mod tests {
             observation_detail_json: None,
             extraction_batch_id: None,
             superseded_by: None,
+            cross_project_count: 1,
+            causal_role: None,
             created_at: "2026-06-01T00:00:00Z".to_string(),
         }
     }

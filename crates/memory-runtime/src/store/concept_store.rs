@@ -6,6 +6,7 @@ use rusqlite::{params, Connection};
 
 use crate::error::MemoryResult;
 use crate::models::concept::{Concept, ConceptCandidate, ConceptType};
+use crate::models::scope::LifecycleScope;
 use crate::models::status::{CandidateStatus, ConceptStatus};
 
 use super::traits::ConceptStore;
@@ -35,7 +36,7 @@ const CONCEPT_COLUMNS: &str = "\
     known_facts_json, rejected_hypotheses_json, open_questions_json, evidence_json, confidence, \
     evidence_alpha, evidence_beta, status, parent_concept_id, hierarchy_depth, \
     last_recalled_at, recall_count, successful_recall_count, failed_recall_count, \
-    connection_count, created_at, updated_at";
+    connection_count, lifecycle_scope, scope_key, created_at, updated_at";
 
 static CANDIDATE_INSERT: LazyLock<String> = LazyLock::new(|| {
     format!("INSERT INTO concept_candidate ({CANDIDATE_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)")
@@ -47,7 +48,7 @@ static CANDIDATE_LIST: LazyLock<String> = LazyLock::new(|| {
     format!("SELECT {CANDIDATE_COLUMNS} FROM concept_candidate WHERE workspace_id = ?1 AND (?2 IS NULL OR status = ?2) ORDER BY created_at DESC")
 });
 static CONCEPT_INSERT: LazyLock<String> = LazyLock::new(|| {
-    format!("INSERT INTO concept ({CONCEPT_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)")
+    format!("INSERT INTO concept ({CONCEPT_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)")
 });
 static CONCEPT_GET: LazyLock<String> =
     LazyLock::new(|| format!("SELECT {CONCEPT_COLUMNS} FROM concept WHERE concept_id = ?1"));
@@ -150,6 +151,8 @@ impl ConceptStore for SqliteConceptStore {
                 &concept.successful_recall_count,
                 &concept.failed_recall_count,
                 &concept.connection_count,
+                concept.lifecycle_scope.as_str(),
+                concept.scope_key,
                 &concept.created_at,
                 &concept.updated_at,
             ],
@@ -252,6 +255,160 @@ impl ConceptStore for SqliteConceptStore {
         let conn = self.conn.lock();
         record_recall_outcome_conn(&conn, concept_id, success)
     }
+
+    fn list_visible_concepts(
+        &self,
+        workspace_id: &str,
+        status: Option<ConceptStatus>,
+        include_domain_keys: &[String],
+        include_global: bool,
+    ) -> MemoryResult<Vec<Concept>> {
+        let conn = self.conn.lock();
+        let s = status.map(|st| st.as_str());
+        if !include_global && include_domain_keys.is_empty() {
+            return map_rows(&conn, &CONCEPT_LIST, params![workspace_id, s], row_to_concept);
+        }
+
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        params.push(Box::new(workspace_id.to_string()));
+        params.push(Box::new(s));
+        params.push(Box::new(include_global));
+        params.push(Box::new(!include_domain_keys.is_empty()));
+        let domain_ph: Vec<String> = (0..include_domain_keys.len())
+            .map(|i| format!("?{}", i + 5))
+            .collect();
+        for k in include_domain_keys {
+            params.push(Box::new(k.clone()));
+        }
+        let domain_clause = if domain_ph.is_empty() {
+            "0".to_string()
+        } else {
+            format!("(lifecycle_scope = 'domain' AND scope_key IN ({}))", domain_ph.join(", "))
+        };
+        let sql = format!(
+            "SELECT {CONCEPT_COLUMNS} FROM concept \
+             WHERE ((workspace_id = ?1 AND (?2 IS NULL OR status = ?2)) \
+                OR ((?2 IS NULL OR status = ?2) AND (\
+                   (?3 = 1 AND lifecycle_scope = 'global') \
+                   OR (?4 = 1 AND {domain_clause})\
+                ))) \
+             ORDER BY created_at DESC"
+        );
+        map_rows(&conn, &sql, rusqlite::params_from_iter(params), row_to_concept)
+    }
+
+    fn update_lifecycle_scope(
+        &self,
+        concept_id: &str,
+        scope: LifecycleScope,
+        scope_key: Option<&str>,
+    ) -> MemoryResult<()> {
+        let conn = self.conn.lock();
+        let changed = conn.execute(
+            "UPDATE concept SET lifecycle_scope = ?1, scope_key = ?2, updated_at = ?3 WHERE concept_id = ?4",
+            params![scope.as_str(), scope_key, chrono::Utc::now().to_rfc3339(), concept_id],
+        )?;
+        require_concept_row(changed, concept_id)
+    }
+
+    fn link_alias(
+        &self,
+        primary_concept_id: &str,
+        alias_concept_id: &str,
+        reason: &str,
+    ) -> MemoryResult<()> {
+        let conn = self.conn.lock();
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT OR IGNORE INTO concept_alias (alias_id, primary_concept_id, alias_concept_id, reason, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                uuid::Uuid::new_v4().to_string(),
+                primary_concept_id,
+                alias_concept_id,
+                reason,
+                now
+            ],
+        )?;
+        // An aliased project concept is no longer an independent primary for recall.
+        conn.execute(
+            "UPDATE concept SET status = 'deprecated', updated_at = ?1 WHERE concept_id = ?2",
+            params![now, alias_concept_id],
+        )?;
+        Ok(())
+    }
+
+    fn resolve_alias(&self, concept_id: &str) -> MemoryResult<String> {
+        let conn = self.conn.lock();
+        let mut current = concept_id.to_string();
+        // Bounded walk (alias chains should be short).
+        for _ in 0..8 {
+            let next: Option<String> = match conn.query_row(
+                "SELECT primary_concept_id FROM concept_alias WHERE alias_concept_id = ?1",
+                params![&current],
+                |r| r.get(0),
+            ) {
+                Ok(v) => Some(v),
+                Err(rusqlite::Error::QueryReturnedNoRows) => None,
+                Err(e) => return Err(e.into()),
+            };
+            match next {
+                Some(p) if p != current => current = p,
+                _ => break,
+            }
+        }
+        Ok(current)
+    }
+
+    fn find_cross_workspace_peers(
+        &self,
+        workspace_id: &str,
+        entities: &[String],
+        min_overlap: usize,
+    ) -> MemoryResult<Vec<Concept>> {
+        let conn = self.conn.lock();
+        if entities.is_empty() || min_overlap == 0 {
+            return Ok(vec![]);
+        }
+        let placeholders: Vec<String> = (0..entities.len()).map(|i| format!("?{}", i + 2)).collect();
+        let sql = format!(
+            "SELECT {cols}, COUNT(DISTINCT ec.entity) AS overlap \
+             FROM concept c \
+             JOIN entity_concept ec ON ec.concept_id = c.concept_id \
+             WHERE c.workspace_id != ?1 AND c.status = 'active' AND c.lifecycle_scope = 'project' \
+               AND ec.entity IN ({placeholders}) \
+             GROUP BY c.concept_id \
+             HAVING overlap >= ?{min_ph} \
+             ORDER BY overlap DESC, c.confidence DESC",
+            cols = &*CONCEPT_COLS_QUALIFIED,
+            placeholders = placeholders.join(", "),
+            min_ph = entities.len() + 2
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let mut bound: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        bound.push(Box::new(workspace_id.to_string()));
+        for e in entities {
+            bound.push(Box::new(e.clone()));
+        }
+        bound.push(Box::new(min_overlap as i64));
+        let rows = stmt
+            .query_map(rusqlite::params_from_iter(bound), row_to_concept)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    fn list_other_workspace_active_concepts(
+        &self,
+        workspace_id: &str,
+    ) -> MemoryResult<Vec<Concept>> {
+        let conn = self.conn.lock();
+        let sql = format!(
+            "SELECT {CONCEPT_COLUMNS} FROM concept \
+             WHERE workspace_id != ?1 AND status = 'active' \
+             ORDER BY workspace_id, concept_id"
+        );
+        map_rows(&conn, &sql, params![workspace_id], row_to_concept)
+    }
 }
 
 /// Read a concept by id on an already-held connection. Extracted so the feedback
@@ -275,14 +432,15 @@ pub(crate) fn update_concept_conn(conn: &Connection, concept: &Concept) -> Memor
         "UPDATE concept SET name = ?1, concept_type = ?2, definition = ?3, related_entities_json = ?4,
          known_facts_json = ?5, rejected_hypotheses_json = ?6, open_questions_json = ?7, evidence_json = ?8,
          confidence = ?9, evidence_alpha = ?10, evidence_beta = ?11, status = ?12,
-         parent_concept_id = ?13, hierarchy_depth = ?14, updated_at = ?15
-         WHERE concept_id = ?16",
+         parent_concept_id = ?13, hierarchy_depth = ?14, lifecycle_scope = ?15, scope_key = ?16, updated_at = ?17
+         WHERE concept_id = ?18",
         params![
             concept.name, concept.concept_type.as_ref().map(|t| t.as_str()),
             concept.definition, concept.related_entities_json, concept.known_facts_json,
             concept.rejected_hypotheses_json, concept.open_questions_json, concept.evidence_json,
             concept.confidence, concept.evidence_alpha, concept.evidence_beta, concept.status.as_str(),
-            concept.parent_concept_id, concept.hierarchy_depth, concept.updated_at, concept.concept_id,
+            concept.parent_concept_id, concept.hierarchy_depth,
+            concept.lifecycle_scope.as_str(), concept.scope_key, concept.updated_at, concept.concept_id,
         ],
     )?;
     require_concept_row(changed, &concept.concept_id)?;
@@ -381,8 +539,10 @@ fn row_to_concept(row: &rusqlite::Row<'_>) -> rusqlite::Result<Concept> {
         successful_recall_count: row.get(18)?,
         failed_recall_count: row.get(19)?,
         connection_count: row.get(20)?,
-        created_at: row.get(21)?,
-        updated_at: row.get(22)?,
+        lifecycle_scope: parse_lifecycle_scope(&row.get::<_, String>(21)?),
+        scope_key: row.get(22)?,
+        created_at: row.get(23)?,
+        updated_at: row.get(24)?,
     })
 }
 
@@ -400,6 +560,13 @@ fn parse_concept_status(s: &str) -> ConceptStatus {
     })
 }
 
+fn parse_lifecycle_scope(s: &str) -> crate::models::scope::LifecycleScope {
+    s.parse().unwrap_or_else(|_| {
+        tracing::warn!("Unknown lifecycle_scope '{s}', defaulting to project");
+        crate::models::scope::LifecycleScope::Project
+    })
+}
+
 fn parse_concept_type(s: &str) -> Option<ConceptType> {
     match s.parse::<ConceptType>() {
         Ok(t) => Some(t),
@@ -411,7 +578,7 @@ fn parse_concept_type(s: &str) -> Option<ConceptType> {
 }
 
 /// Parse a concept's `related_entities_json` into entity strings.
-fn parse_entities(json: &Option<String>) -> Vec<String> {
+pub fn parse_entities(json: &Option<String>) -> Vec<String> {
     json.as_deref()
         .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok())
         .unwrap_or_default()
@@ -461,6 +628,8 @@ mod tests {
             successful_recall_count: 0,
             failed_recall_count: 0,
             connection_count: 0,
+            lifecycle_scope: crate::models::scope::LifecycleScope::Project,
+            scope_key: None,
             created_at: "2026-06-13T00:00:00Z".to_string(),
             updated_at: "2026-06-13T00:00:00Z".to_string(),
         }
@@ -597,6 +766,8 @@ mod tests {
             successful_recall_count: 3,
             failed_recall_count: 2,
             connection_count: 7,
+            lifecycle_scope: crate::models::scope::LifecycleScope::Project,
+            scope_key: None,
             created_at: "2026-06-01T00:00:00Z".into(),
             updated_at: "2026-06-02T00:00:00Z".into(),
         };

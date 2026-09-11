@@ -68,6 +68,11 @@ fn get_weight(evidence_type: &EvidenceType) -> (f64, f64) {
         .unwrap_or((0.0, 0.0))
 }
 
+/// Raw (α, β) deltas for an evidence type. Used by P7 scaled edge updates.
+pub fn evidence_deltas(evidence_type: &EvidenceType) -> (f64, f64) {
+    get_weight(evidence_type)
+}
+
 impl BetaConfidence {
     pub fn new() -> Self {
         Self {

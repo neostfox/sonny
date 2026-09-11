@@ -8,124 +8,52 @@
 
 ---
 
-## 当前状态（截至 2026-06-14）
+## 当前状态（截至 2026-07 · P6–P8 已实现）
 
-**已完成：** 核心存储与提取链路。
+**已完成：** 单项目记忆库闭环 + 概念关系边 + 跨项目分层 + 因果融合 + 结构迁移。
 
-- Observation 双维度置信度（extraction × fact）
-- 封闭谓词词汇表 + 规范化
-- SQLite 存储 + 版本化迁移（6 版）
-- Coclaim 共现关系（P2-C）
-- 反向纠正（P2-D）
-- Embedding 存储 + 余弦检索（P3-A）
-- 基础聚合并（ClusterEngine / MergeSplitEngine）
-- 72 测试通过，clippy 干净
+| 阶段 | 内容 | 状态 |
+|------|------|------|
+| P0–P4 | 存储/提取/聚类/召回/反馈闭环 | ✅ |
+| P5-A | `concept_relation` 边 + 边级 Beta 生命周期 | ✅ |
+| P6 | `lifecycle_scope`、`cross_project_count`、推广、可见性、别名合并 | ✅ |
+| P7 | `causal_role`、do-充分统计量、异源证据权重、LinkEngine 接入 | ✅ |
+| P8 | WL 结构指纹、跨 workspace 同构检测、迁移召回 notes | ✅ |
 
-**当前定位：** 单一项目的记忆库——存什么、找什么。不是跨项目的知识引擎。
+**当前定位：** 跨项目因果知识引擎（结构迁移为工程近似，非完整图同构推理机）。
 
----
+### 关键入口
 
-## 当前架构的逻辑断点
+| 能力 | 代码 |
+|------|------|
+| 推广条件 | `models/scope.rs` · `pipeline/promote.rs` |
+| 跨项目计数 | `ObservationStore::sync_cross_project_count` |
+| 可见性 | `ConceptStore::list_visible_concepts` · `RecallEngine::with_elevated_visibility` |
+| 因果角色 | `models/causal.rs` · LinkEngine `record_causal_evidence` |
+| 结构迁移 | `pipeline/transfer.rs` · `transfer_notes_for_concepts` |
 
-### 断点一：`workspace_id` 完全隔离，没有知识继承机制
+### 验收测试
 
-一个 workspace 里的 Observation / Concept / 置信度对另一个 workspace 完全不可见。
-在项目 A 验证了 12 次的因果规律在项目 B 从零开始。
-
-**需要：概念分层。**
-```
-全局层（所有项目可见）         ← 跨项目验证后的知识
-  ↑ 证据 + 泛化阈值达成
-领域层（同语言/框架共享）       ← 结构相似项目的共同模式
-  ↑ 证据 + 泛化阈值达成
-项目层（单项目私有）           ← 初始状态
-```
-
-### 断点二：概念合并只看实体重叠，不看结构同构性
-
-MergeSplitEngine 用 Jaccard 相似度决定合并。但 "Rust 模块边界" 和
-"domain layer constraints" 实体完全不同，却是同一条因果规律。结构相似性
-（谓词分布、因果图结构）没有被捕获。
-
-**需要：结构相似度（因果图同构）。**
-
-### 断点三：证据权重只看类型，不看复用程度
-
-一条在 5 个项目中验证了 12 次的 Observation 和一条只在一个项目中
-验证了 12 次的 Observation 有相同的 alpha/beta。跨项目复用次数
-是独立于贝叶斯框架的元置信度指标——一条知识的泛化能力不是靠
-它在同一个项目的重复次数来体现的。
-
-**需要：`cross_project_count` —— 跨 workspace 独立验证次数。**
-
-### 断点四：不同来源的知识类型互补，但融合路径缺失
-
-| 来源 | 提供什么 | 在因果图中的角色 |
-|---|---|---|
-| Obsidian | 关联发现（概念共现、主题聚集） | 候选因果边（低权重观测证据） |
-| 用户反馈 | 标注（对/错/偏好/修正） | 边的确认/否定 |
-| ctl gate | 验证过的因果（干预 → 结果 → gate 判定） | 确认因果边（高权重干预证据） |
-
-三者是同一条因果边的三段证据积累，不是三个独立的管线。
-当前设计把它们都当成同样的 Observation 处理——来源差异被抹平。
-
-**需要：因果边升级链路。**
-```
-Obsidian 关联 → 候选边 → 用户确认 → 已验证边 → ctl gate 验证 → 确认因果边
-```
-
-### 断点五：召回是检索，不是迁移
-
-当前 recall：在当前 workspace 里找相关 Concept → 返回 facts。
-知识复利要求：在所有 workspace 里找**结构相似**的模块/概念，
-提取它们的因果边 + 变更历史，映射到当前场景。
-
-**需要：结构类比引擎。** "我不管这个模块叫什么名字，它的因果依赖结构
-和另一个模块相似"——这是迁移推理的基础。
+- `tests/p6_layering_test.rs` — 跨项目计数 / 推广 / 可见性 / 别名合并
+- `tests/p7_causal_fusion_test.rs` — Intervention→p_do、异源权重
+- `tests/p8_transfer_test.rs` — 异名同构模块迁移 notes
 
 ---
 
-## 待构建的三层
+## 后续可选增强（非本轮范围）
 
-### 第一层：概念分层与跨项目验证
-
-- [ ] `Concept.lifecycle_scope`: `Project | Domain | Global`
-- [ ] 推广条件：跨 workspace 独立验证次数 + 置信度阈值 + 结构一致性检查
-- [ ] `Observation.cross_project_count`：同一条因果规律在多少个不同 workspace 中被观测到
-- [ ] 跨 workspace 的概念去重与合并（结构相似度，不是实体 Jaccard）
-
-### 第二层：因果证据的异源融合
-
-- [ ] `Observation.causal_role`: `Intervention | Outcome | ObservedAssociation | Confound`
-- [ ] 因果共现充分统计量：`(cause, effect, P(effect|do(cause)), P(effect|cause), P(effect|!cause))`
-- [ ] 证据权重 = 类型 × 来源 × 复用次数（不是固定常量）
-- [ ] 因果边生命周期：候选 → 已验证 → 确认（跨源渐进升级）
-
-### 第三层：结构类比与迁移推理
-
-- [ ] 概念结构的图表示（实体 + 谓词 + 因果方向 → 有向图）
-- [ ] 跨 workspace 的图同构检测（不看实体名字，看图结构）
-- [ ] 迁移查询：给定当前项目的一个模块，在所有 workspace 中找到结构最相似的模块，提取其因果边
-- [ ] Recall 从检索模式升级为迁移模式：返回的不是"当前项目已知什么"，而是"根据其他项目的经验，这里需要注意什么"
-
----
-
-## 优先级
-
-| 优先级 | 任务 | 理由 |
-|---|---|---|
-| P1 | 概念分层（Project/Domain/Global） | 所有跨项目逻辑的基础——没有分层就没有复用 |
-| P2 | `cross_project_count` + 跨项目验证 | 区分"凑巧"和"规律"的唯一方式 |
-| P3 | 因果角色标记（Intervention/ObservedAssociation） | 让 ctl 的干预数据和 Obsidian 的观测数据发挥不同的数学作用 |
-| P4 | 结构相似度 + 图同构 | 让召回从检索变成迁移 |
-| P5 | 因果边生命周期的异源融合管线 | 三个来源（Obsidian/反馈/ctl）组成完整的因果证据链 |
+- Domain 权威来源（workspace metadata 自动推断 scope_key）
+- Predictive Coding 提取（concept-growth Stage 2）
+- Adversarial validation LLM
+- sqlite-vec 加速
+- GNN / 元学习（概念数 ≥ 500）
 
 ---
 
 ## 不变的设计原则
 
-1. **贝叶斯因果推断是工具，知识复利是目标。** 因果图不是用来炫耀的——是用来让旧知识在新场景中产生杠杆的。
-2. **跨项目验证 > 单项目重复。** 一条在 5 个项目里各验证了 1 次的知识，比一条在 1 个项目里验证了 5 次的知识更有价值。
-3. **结构 > 名字。** 两个模块叫不同的名字但有相同的因果依赖结构 → 它们在因果意义上是同一类东西。
-4. **异源证据不应该等权。** 一次 ctl gate 验证提供的因果信息远大于一次 Obsidian 链接暗示的关联。
-5. **客户端是证据提供者，Sonny 是因果推断引擎。** 提取逻辑、格式化逻辑属于客户端适配层，不属于 Sonny 核心。
+1. **贝叶斯因果推断是工具，知识复利是目标。**
+2. **跨项目验证 > 单项目重复。**
+3. **结构 > 名字。**
+4. **异源证据不应该等权。**
+5. **客户端是证据提供者，Sonny 是因果推断引擎。**

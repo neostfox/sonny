@@ -217,6 +217,8 @@ fn raw_to_observation(
         observation_detail_json: None,
         extraction_batch_id: Some(extraction_batch_id.to_string()),
         superseded_by: None,
+        cross_project_count: 1,
+        causal_role: None,
         consolidated: false,
         created_at: chrono::Utc::now().to_rfc3339(),
     }
@@ -247,6 +249,13 @@ pub async fn extract_and_dedup<S: ObservationStore>(
             store.update_confidence(&existing.observation_id, bc.alpha, bc.beta)?;
             duplicates += 1;
         } else {
+            // P6-B: same triple may already live in another workspace — keep
+            // cross_project_count coherent before the caller inserts this row.
+            store.sync_cross_project_count(
+                &obs.subject_text,
+                &obs.predicate,
+                obs.object_text.as_deref(),
+            )?;
             kept.push(obs);
         }
     }

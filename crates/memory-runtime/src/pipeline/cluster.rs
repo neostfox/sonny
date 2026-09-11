@@ -504,6 +504,24 @@ mod tests {
         ) -> MemoryResult<usize> {
             unreachable!()
         }
+
+        fn find_duplicate_any_workspace(
+            &self,
+            _subject: &str,
+            _predicate: &str,
+            _object: Option<&str>,
+        ) -> MemoryResult<Vec<Observation>> {
+            Ok(Vec::new())
+        }
+
+        fn sync_cross_project_count(
+            &self,
+            _subject: &str,
+            _predicate: &str,
+            _object: Option<&str>,
+        ) -> MemoryResult<i64> {
+            Ok(1)
+        }
     }
 
     fn obs(id: &str, subject: &str, object: Option<&str>) -> Observation {
@@ -528,6 +546,8 @@ mod tests {
             observation_detail_json: None,
             extraction_batch_id: None,
             superseded_by: None,
+            cross_project_count: 1,
+            causal_role: None,
             created_at: "2026-06-14T00:00:00Z".to_string(),
         }
     }

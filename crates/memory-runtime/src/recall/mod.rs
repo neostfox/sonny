@@ -34,6 +34,8 @@ where
     embeddings: &'a E,
     provider: &'a P,
     decay_half_life_days: f64,
+    include_domain_keys: Vec<String>,
+    include_global: bool,
 }
 
 impl<'a, C, E, P> RecallEngine<'a, C, E, P>
@@ -48,6 +50,8 @@ where
             embeddings,
             provider,
             decay_half_life_days: DEFAULT_DECAY_HALF_LIFE_DAYS,
+            include_domain_keys: Vec::new(),
+            include_global: false,
         }
     }
 
@@ -56,6 +60,17 @@ where
     /// constructing from settings).
     pub fn with_decay_half_life(mut self, days: f64) -> Self {
         self.decay_half_life_days = days;
+        self
+    }
+
+    /// P6-D: include Domain/Global concepts from other workspaces.
+    pub fn with_elevated_visibility(
+        mut self,
+        include_domain_keys: Vec<String>,
+        include_global: bool,
+    ) -> Self {
+        self.include_domain_keys = include_domain_keys;
+        self.include_global = include_global;
         self
     }
 
@@ -94,11 +109,13 @@ where
         let query_slice = query_vector.as_slice().unwrap_or(&[]);
 
         if !query_slice.is_empty() {
-            for hit in self.embeddings.search(
+            for hit in self.embeddings.search_including_elevated(
                 query_slice,
                 workspace_id,
                 SEMANTIC_TOP_K,
                 SEMANTIC_THRESHOLD,
+                &self.include_domain_keys,
+                self.include_global,
             )? {
                 if hit.source_type == EmbeddingSourceType::Concept {
                     let entry = scores.entry(hit.source_id.clone()).or_insert(RecallScore {
@@ -161,6 +178,17 @@ where
                         concept.status,
                         ConceptStatus::Active | ConceptStatus::Disputed
                     ) {
+                        continue;
+                    }
+                    // P6-D: foreign-workspace hits require elevated visibility.
+                    if concept.workspace_id != workspace_id
+                        && !crate::models::scope::is_visible(
+                            &concept,
+                            workspace_id,
+                            &self.include_domain_keys,
+                            self.include_global,
+                        )
+                    {
                         continue;
                     }
                     score.recency = concept_recency(&concept, self.decay_half_life_days, now);
@@ -607,6 +635,8 @@ mod tests {
             successful_recall_count: 0,
             failed_recall_count: 0,
             connection_count: 0,
+            lifecycle_scope: crate::models::scope::LifecycleScope::Project,
+            scope_key: None,
             created_at: "2026-06-14T00:00:00Z".to_string(),
             updated_at: "2026-06-14T00:00:00Z".to_string(),
         }

@@ -136,6 +136,7 @@ impl LinkEngine {
         }
 
         // 3. `causes` observations → directed causal edges (subject → object).
+        // P7-A/C: honor causal_role and feed do-statistics + heterogeneous weights.
         for obs in &live {
             if obs.predicate != "causes" {
                 continue;
@@ -143,6 +144,17 @@ impl LinkEngine {
             let Some(object_text) = obs.object_text.as_deref().filter(|s| !s.is_empty()) else {
                 continue;
             };
+            let (evidence, _strength) = match crate::models::causal::causal_edge_evidence(obs) {
+                Some(pair) => pair,
+                None => causal_evidence_fallback(obs),
+            };
+            // Confounds never support the edge.
+            if obs.causal_role.as_deref() == Some("confound") {
+                continue;
+            }
+            let mut stats = crate::models::causal::CausalStats::default();
+            stats.absorb_observation(obs);
+
             let empty = BTreeSet::new();
             let sources = entity_index
                 .get(&canonical_key_light(&obs.subject_text))
@@ -150,18 +162,19 @@ impl LinkEngine {
             let targets = entity_index
                 .get(&canonical_key_light(object_text))
                 .unwrap_or(&empty);
-            let evidence = causal_evidence_type(obs);
             for src in sources {
                 for dst in targets {
                     if src == dst {
                         continue;
                     }
-                    relations.record_evidence(
+                    relations.record_causal_evidence(
                         workspace_id,
                         src,
                         dst,
-                        RelationType::Causal,
                         &evidence,
+                        Some(obs.source_type),
+                        obs.cross_project_count,
+                        &stats,
                     )?;
                     report.causal_evidence += 1;
                 }
@@ -172,14 +185,15 @@ impl LinkEngine {
     }
 }
 
-/// Edge evidence implied by a `causes` observation's provenance. Falls back to
-/// `RepeatedOccurrence` for uncorroborated user claims so the edge still
-/// accumulates weak positive evidence (source trust already gated the
-/// observation itself at extraction).
-fn causal_evidence_type(obs: &Observation) -> EvidenceType {
-    obs.source_type
-        .initial_evidence()
-        .unwrap_or(EvidenceType::RepeatedOccurrence)
+/// Fallback when causal_role is absent: map source provenance to an edge
+/// evidence type (P5-A behavior preserved).
+fn causal_evidence_fallback(obs: &Observation) -> (EvidenceType, f64) {
+    (
+        obs.source_type
+            .initial_evidence()
+            .unwrap_or(EvidenceType::RepeatedOccurrence),
+        1.0,
+    )
 }
 
 fn is_live(status: &ObservationStatus) -> bool {
@@ -293,6 +307,8 @@ mod tests {
             successful_recall_count: 0,
             failed_recall_count: 0,
             connection_count: 0,
+            lifecycle_scope: crate::models::scope::LifecycleScope::Project,
+            scope_key: None,
             created_at: "t0".to_string(),
             updated_at: "t0".to_string(),
         }
@@ -327,6 +343,8 @@ mod tests {
             observation_detail_json: None,
             extraction_batch_id: batch.map(str::to_string),
             superseded_by: None,
+            cross_project_count: 1,
+            causal_role: None,
             created_at: "t0".to_string(),
         }
     }
@@ -356,7 +374,14 @@ mod tests {
             .unwrap()
             .expect("causal edge must exist");
         assert_eq!(edge.src_concept_id, "c-mask");
-        assert!((edge.weight() - 2.5 / 3.5).abs() < 1e-9); // FileEvidence: alpha += 1.5
+        // P7-C: FileEvidence base 1.5 × source trust 1.25 = α += 1.875
+        let expected_alpha = 1.0 + 1.5 * 1.25;
+        assert!(
+            (edge.weight() - expected_alpha / (expected_alpha + 1.0)).abs() < 1e-9,
+            "weight={} expected={}",
+            edge.weight(),
+            expected_alpha / (expected_alpha + 1.0)
+        );
         // Reverse direction must NOT exist.
         assert!(f
             .relations

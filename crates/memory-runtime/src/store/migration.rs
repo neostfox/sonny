@@ -27,6 +27,8 @@ const MIGRATIONS: &[(u32, &str)] = &[
         9,
         include_str!("../migrations/009_p4b_p5a_foreign_keys.sql"),
     ),
+    (10, include_str!("../migrations/010_p6_layering.sql")),
+    (11, include_str!("../migrations/011_p7_causal_fusion.sql")),
 ];
 
 pub fn run_migrations(conn: &Connection) -> MemoryResult<()> {

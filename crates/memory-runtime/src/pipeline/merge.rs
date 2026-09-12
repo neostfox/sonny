@@ -447,6 +447,8 @@ mod tests {
             observation_detail_json: None,
             extraction_batch_id: None,
             superseded_by: None,
+            cross_project_count: 1,
+            causal_role: None,
             created_at: "2026-06-14T00:00:00Z".to_string(),
         }
     }

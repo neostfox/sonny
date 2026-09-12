@@ -15,6 +15,78 @@ impl SqliteEmbeddingStore {
     pub fn new(conn: Arc<Mutex<Connection>>) -> Self {
         Self { conn }
     }
+
+    fn search_impl(
+        &self,
+        query_vector: &[f32],
+        workspace_id: &str,
+        top_k: usize,
+        threshold: f32,
+        include_domain_keys: &[String],
+        include_global: bool,
+    ) -> MemoryResult<Vec<EmbeddingSearchResult>> {
+        let conn = self.conn.lock();
+        let elevated = include_global || !include_domain_keys.is_empty();
+        let sql = if elevated {
+            let domain_ph: Vec<String> = (0..include_domain_keys.len())
+                .map(|i| format!("?{}", i + 2))
+                .collect();
+            let domain_clause = if domain_ph.is_empty() {
+                "0".to_string()
+            } else {
+                format!(
+                    "(c.lifecycle_scope = 'domain' AND c.scope_key IN ({}))",
+                    domain_ph.join(", ")
+                )
+            };
+            format!(
+                "SELECT e.source_type, e.source_id, e.vector FROM embedding e \
+                 LEFT JOIN concept c ON c.concept_id = e.source_id AND e.source_type = 'concept' \
+                 WHERE e.workspace_id = ?1 \
+                    OR (\
+                       (?{g} = 1 AND c.lifecycle_scope = 'global') \
+                       OR {domain_clause}\
+                    )",
+                g = include_domain_keys.len() + 2
+            )
+        } else {
+            "SELECT source_type, source_id, vector FROM embedding WHERE workspace_id = ?1"
+                .to_string()
+        };
+
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(workspace_id.to_string())];
+        if elevated {
+            for k in include_domain_keys {
+                params.push(Box::new(k.clone()));
+            }
+            params.push(Box::new(include_global));
+        }
+
+        let mut stmt = conn.prepare(&sql)?;
+        let mut rows = stmt.query(rusqlite::params_from_iter(params))?;
+        let mut results = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        while let Some(row) = rows.next()? {
+            let source_type_raw: String = row.get(0)?;
+            let source_id: String = row.get(1)?;
+            if !seen.insert(source_id.clone()) {
+                continue;
+            }
+            let blob: Vec<u8> = row.get(2)?;
+            let vector = decode_vector(&blob)?;
+            let score = cosine(query_vector, &vector);
+            if score >= threshold as f64 {
+                results.push(EmbeddingSearchResult {
+                    source_id,
+                    source_type: parse_source_type(&source_type_raw)?,
+                    score,
+                });
+            }
+        }
+        results.sort_by(|a, b| b.score.total_cmp(&a.score));
+        results.truncate(top_k);
+        Ok(results)
+    }
 }
 
 fn encode_vector(vector: &[f32]) -> Vec<u8> {
@@ -104,29 +176,26 @@ impl EmbeddingStore for SqliteEmbeddingStore {
         top_k: usize,
         threshold: f32,
     ) -> MemoryResult<Vec<EmbeddingSearchResult>> {
-        let conn = self.conn.lock();
-        let mut stmt = conn.prepare(
-            "SELECT source_type, source_id, vector FROM embedding WHERE workspace_id = ?1",
-        )?;
-        let mut rows = stmt.query(params![workspace_id])?;
-        let mut results = Vec::new();
-        while let Some(row) = rows.next()? {
-            let source_type_raw: String = row.get(0)?;
-            let source_id: String = row.get(1)?;
-            let blob: Vec<u8> = row.get(2)?;
-            let vector = decode_vector(&blob)?;
-            let score = cosine(query_vector, &vector);
-            if score >= threshold as f64 {
-                results.push(EmbeddingSearchResult {
-                    source_id,
-                    source_type: parse_source_type(&source_type_raw)?,
-                    score,
-                });
-            }
-        }
-        results.sort_by(|a, b| b.score.total_cmp(&a.score));
-        results.truncate(top_k);
-        Ok(results)
+        self.search_impl(query_vector, workspace_id, top_k, threshold, &[], false)
+    }
+
+    fn search_including_elevated(
+        &self,
+        query_vector: &[f32],
+        workspace_id: &str,
+        top_k: usize,
+        threshold: f32,
+        include_domain_keys: &[String],
+        include_global: bool,
+    ) -> MemoryResult<Vec<EmbeddingSearchResult>> {
+        self.search_impl(
+            query_vector,
+            workspace_id,
+            top_k,
+            threshold,
+            include_domain_keys,
+            include_global,
+        )
     }
 
     fn get_embedding(&self, source_type: &str, source_id: &str) -> MemoryResult<Option<Vec<f32>>> {

@@ -24,10 +24,10 @@ const OBS_COLUMNS: &str = "\
     observation_id, workspace_id, memory_id, subject_text, subject_type, \
     predicate, object_text, object_type, evidence_text, extraction_confidence, evidence_alpha, evidence_beta, \
     status, surprise_score, source_type, consolidated, created_at, \
-    memory_type_candidate, observation_detail_json, extraction_batch_id, superseded_by";
+    memory_type_candidate, observation_detail_json, extraction_batch_id, superseded_by, cross_project_count, causal_role";
 
 static OBS_INSERT: LazyLock<String> = LazyLock::new(|| {
-    format!("INSERT INTO observation ({OBS_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)")
+    format!("INSERT INTO observation ({OBS_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)")
 });
 static OBS_GET: LazyLock<String> =
     LazyLock::new(|| format!("SELECT {OBS_COLUMNS} FROM observation WHERE observation_id = ?1"));
@@ -197,6 +197,80 @@ impl ObservationStore for SqliteObservationStore {
         tx.commit()?;
         Ok(superseded)
     }
+
+    fn find_duplicate_any_workspace(
+        &self,
+        subject: &str,
+        predicate: &str,
+        object: Option<&str>,
+    ) -> MemoryResult<Vec<Observation>> {
+        let conn = self.conn.lock();
+        let sql = if object.is_some() {
+            format!(
+                "SELECT {OBS_COLUMNS} FROM observation \
+                 WHERE subject_text = ?1 AND predicate = ?2 AND object_text = ?3 \
+                   AND status NOT IN ('superseded','rejected','deprecated') \
+                 ORDER BY workspace_id, created_at"
+            )
+        } else {
+            format!(
+                "SELECT {OBS_COLUMNS} FROM observation \
+                 WHERE subject_text = ?1 AND predicate = ?2 AND object_text IS NULL \
+                   AND status NOT IN ('superseded','rejected','deprecated') \
+                 ORDER BY workspace_id, created_at"
+            )
+        };
+        if let Some(object) = object {
+            collect_rows(&conn, &sql, params![subject, predicate, object])
+        } else {
+            collect_rows(&conn, &sql, params![subject, predicate])
+        }
+    }
+
+    fn sync_cross_project_count(
+        &self,
+        subject: &str,
+        predicate: &str,
+        object: Option<&str>,
+    ) -> MemoryResult<i64> {
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        let count: i64 = if let Some(object) = object {
+            tx.query_row(
+                "SELECT COUNT(DISTINCT workspace_id) FROM observation \
+                 WHERE subject_text = ?1 AND predicate = ?2 AND object_text = ?3 \
+                   AND status NOT IN ('superseded','rejected','deprecated')",
+                params![subject, predicate, object],
+                |r| r.get(0),
+            )?
+        } else {
+            tx.query_row(
+                "SELECT COUNT(DISTINCT workspace_id) FROM observation \
+                 WHERE subject_text = ?1 AND predicate = ?2 AND object_text IS NULL \
+                   AND status NOT IN ('superseded','rejected','deprecated')",
+                params![subject, predicate],
+                |r| r.get(0),
+            )?
+        };
+        let count = count.max(1);
+        if let Some(object) = object {
+            tx.execute(
+                "UPDATE observation SET cross_project_count = ?1 \
+                 WHERE subject_text = ?2 AND predicate = ?3 AND object_text = ?4 \
+                   AND status NOT IN ('superseded','rejected','deprecated')",
+                params![count, subject, predicate, object],
+            )?;
+        } else {
+            tx.execute(
+                "UPDATE observation SET cross_project_count = ?1 \
+                 WHERE subject_text = ?2 AND predicate = ?3 AND object_text IS NULL \
+                   AND status NOT IN ('superseded','rejected','deprecated')",
+                params![count, subject, predicate],
+            )?;
+        }
+        tx.commit()?;
+        Ok(count)
+    }
 }
 
 fn collect_rows(
@@ -266,7 +340,7 @@ fn require_observation_row(changed: usize, observation_id: &str) -> MemoryResult
 
 /// Insert a single observation row. Shared by `insert`, `insert_batch`,
 /// `replace_session_observations`, and the feedback engine's Correct path, so
-/// the 21-column param list lives in one place.
+/// the param list lives in one place.
 pub(crate) fn insert_observation(conn: &Connection, obs: &Observation) -> rusqlite::Result<()> {
     let status = obs.status.as_str();
     let source = obs.source_type.as_str();
@@ -294,6 +368,8 @@ pub(crate) fn insert_observation(conn: &Connection, obs: &Observation) -> rusqli
             &obs.observation_detail_json,
             &obs.extraction_batch_id,
             &obs.superseded_by,
+            &obs.cross_project_count,
+            &obs.causal_role,
         ],
     )?;
     Ok(())
@@ -363,6 +439,8 @@ fn row_to_observation(row: &rusqlite::Row<'_>) -> rusqlite::Result<Observation> 
         observation_detail_json: row.get(18)?,
         extraction_batch_id: row.get(19)?,
         superseded_by: row.get(20)?,
+        cross_project_count: row.get(21)?,
+        causal_role: row.get(22)?,
     })
 }
 

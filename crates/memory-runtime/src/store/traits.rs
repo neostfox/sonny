@@ -7,6 +7,7 @@ use crate::models::hierarchy::RelationType;
 use crate::models::observation::Observation;
 use crate::models::raw_memory::RawMemory;
 use crate::models::relation::ConceptRelation;
+use crate::models::scope::LifecycleScope;
 use crate::models::status::{CandidateStatus, ConceptStatus, ObservationStatus};
 
 pub trait RawMemoryStore: Send + Sync {
@@ -58,6 +59,22 @@ pub trait ObservationStore: Send + Sync {
     /// replacement. The row is retained with `status = Superseded` for traceability,
     /// mirroring the P2-D session-level mechanism.
     fn supersede(&self, observation_id: &str, superseded_by: &str) -> MemoryResult<()>;
+    /// P6-B: live observations matching (subject, predicate, object) in ANY workspace.
+    /// Used to maintain `cross_project_count` when the same triple appears in a new workspace.
+    fn find_duplicate_any_workspace(
+        &self,
+        subject: &str,
+        predicate: &str,
+        object: Option<&str>,
+    ) -> MemoryResult<Vec<Observation>>;
+    /// P6-B: recompute and persist `cross_project_count` for a triple from
+    /// distinct live workspaces. Returns the new count.
+    fn sync_cross_project_count(
+        &self,
+        subject: &str,
+        predicate: &str,
+        object: Option<&str>,
+    ) -> MemoryResult<i64>;
 }
 
 pub trait ConceptStore: Send + Sync {
@@ -94,6 +111,45 @@ pub trait ConceptStore: Send + Sync {
     /// bumps `successful_recall_count` (slows time decay) or
     /// `failed_recall_count`. Does not touch `recall_count` or the clock.
     fn record_recall_outcome(&self, concept_id: &str, success: bool) -> MemoryResult<()>;
+    /// P6-D: list concepts visible to `workspace_id`, including Domain/Global
+    /// concepts from other workspaces when the matching keys/flags are set.
+    fn list_visible_concepts(
+        &self,
+        workspace_id: &str,
+        status: Option<ConceptStatus>,
+        include_domain_keys: &[String],
+        include_global: bool,
+    ) -> MemoryResult<Vec<Concept>>;
+    /// P6-C: persist lifecycle_scope / scope_key changes.
+    fn update_lifecycle_scope(
+        &self,
+        concept_id: &str,
+        scope: LifecycleScope,
+        scope_key: Option<&str>,
+    ) -> MemoryResult<()>;
+    /// P6-E: link `alias_concept_id` as an alias of `primary_concept_id`.
+    fn link_alias(
+        &self,
+        primary_concept_id: &str,
+        alias_concept_id: &str,
+        reason: &str,
+    ) -> MemoryResult<()>;
+    /// P6-E: resolve an alias (or the concept itself) to the primary concept id.
+    fn resolve_alias(&self, concept_id: &str) -> MemoryResult<String>;
+    /// P6-E: other active project-scoped concepts with high entity overlap in
+    /// other workspaces — candidates for merge-on-promotion.
+    fn find_cross_workspace_peers(
+        &self,
+        workspace_id: &str,
+        entities: &[String],
+        min_overlap: usize,
+    ) -> MemoryResult<Vec<Concept>>;
+    /// P8-C: every active concept in other workspaces (structural peer scan).
+    /// Personal-knowledge scale; callers filter by fingerprint similarity.
+    fn list_other_workspace_active_concepts(
+        &self,
+        workspace_id: &str,
+    ) -> MemoryResult<Vec<Concept>>;
 }
 
 pub trait RelationStore: Send + Sync {
@@ -123,6 +179,18 @@ pub trait RelationStore: Send + Sync {
         concept_id: &str,
     ) -> MemoryResult<Vec<ConceptRelation>>;
     fn list_by_workspace(&self, workspace_id: &str) -> MemoryResult<Vec<ConceptRelation>>;
+    /// P7-C: accumulate causal-edge evidence with heterogeneous weights
+    /// (source trust × reuse) and fold do-statistics into the edge.
+    fn record_causal_evidence(
+        &self,
+        workspace_id: &str,
+        src_concept_id: &str,
+        dst_concept_id: &str,
+        evidence: &EvidenceType,
+        source: Option<crate::models::observation::ObservationSourceType>,
+        cross_project_count: i64,
+        stats: &crate::models::causal::CausalStats,
+    ) -> MemoryResult<ConceptRelation>;
 }
 
 /// P4-B: append-only ledger of user feedback events.
@@ -148,6 +216,17 @@ pub trait EmbeddingStore: Send + Sync {
         workspace_id: &str,
         top_k: usize,
         threshold: f32,
+    ) -> MemoryResult<Vec<EmbeddingSearchResult>>;
+    /// P6-D: like `search`, but also scores concept embeddings whose concept is
+    /// Domain (keys listed) or Global — knowledge promoted out of a project.
+    fn search_including_elevated(
+        &self,
+        query_vector: &[f32],
+        workspace_id: &str,
+        top_k: usize,
+        threshold: f32,
+        include_domain_keys: &[String],
+        include_global: bool,
     ) -> MemoryResult<Vec<EmbeddingSearchResult>>;
     fn get_embedding(&self, source_type: &str, source_id: &str) -> MemoryResult<Option<Vec<f32>>>;
     fn delete(&self, source_type: &str, source_id: &str) -> MemoryResult<()>;

@@ -1,3 +1,4 @@
+pub mod causal;
 pub mod concept;
 pub mod embedding;
 pub mod evidence;
@@ -8,4 +9,5 @@ pub mod predicate;
 pub mod raw_memory;
 pub mod recall;
 pub mod relation;
+pub mod scope;
 pub mod status;

@@ -10,6 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::causal::CausalStats;
 use super::hierarchy::RelationType;
 use crate::confidence::{BetaConfidence, EvidenceType};
 
@@ -61,7 +62,7 @@ impl std::str::FromStr for RelationLifecycle {
 pub const VALIDATED_MIN_WEIGHT: f64 = 0.7;
 pub const VALIDATED_MIN_EVIDENCE: i64 = 3;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ConceptRelation {
     pub relation_id: String,
     pub workspace_id: String,
@@ -76,6 +77,8 @@ pub struct ConceptRelation {
     /// Number of evidence accumulation events (any sign), NOT alpha+beta.
     pub evidence_count: i64,
     pub last_evidence_at: Option<String>,
+    /// P7-B: do-calculus sufficient statistics (meaningful for Causal edges).
+    pub causal_stats: CausalStats,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -100,6 +103,7 @@ impl ConceptRelation {
             evidence_beta: 1.0,
             evidence_count: 0,
             last_evidence_at: None,
+            causal_stats: CausalStats::default(),
             created_at: now.to_string(),
             updated_at: now.to_string(),
         }
@@ -111,9 +115,18 @@ impl ConceptRelation {
     }
 
     /// Accumulate one piece of evidence and apply lifecycle promotion rules.
-    pub fn add_evidence(&mut self, evidence: &EvidenceType, now: &str) {
+    /// Scale factors come from P7-C (source × role × reuse); default 1.0.
+    pub fn add_evidence_scaled(
+        &mut self,
+        evidence: &EvidenceType,
+        now: &str,
+        alpha_scale: f64,
+        beta_scale: f64,
+    ) {
         let mut posterior = BetaConfidence::with_values(self.evidence_alpha, self.evidence_beta);
-        posterior.update(evidence);
+        let (da, db) = crate::confidence::evidence_deltas(evidence);
+        posterior.alpha += da * alpha_scale;
+        posterior.beta += db * beta_scale;
         // Zero-weight evidence (e.g. AssistantSpeculation) shifts neither α nor
         // β; counting it would still push evidence_count toward the Validated
         // threshold without any real support behind the edge. Only weighted
@@ -128,6 +141,11 @@ impl ConceptRelation {
         }
         self.updated_at = now.to_string();
         self.promote(evidence);
+    }
+
+    /// Accumulate one piece of evidence and apply lifecycle promotion rules.
+    pub fn add_evidence(&mut self, evidence: &EvidenceType, now: &str) {
+        self.add_evidence_scaled(evidence, now, 1.0, 1.0);
     }
 
     fn promote(&mut self, evidence: &EvidenceType) {

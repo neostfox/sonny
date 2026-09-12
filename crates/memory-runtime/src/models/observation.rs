@@ -33,6 +33,12 @@ pub struct Observation {
     /// P2-D: when this observation was superseded by a re-extraction, points to the
     /// replacement's `extraction_batch_id`. Paired with `status = Superseded`.
     pub superseded_by: Option<String>,
+    /// P6-B: how many distinct workspaces independently observed this
+    /// (subject, predicate, object) triple. Starts at 1 in the origin workspace.
+    pub cross_project_count: i64,
+    /// P7-A: optional causal role (`intervention` / `outcome` /
+    /// `observed_association` / `confound`). Free-text stored as canonical snake_case.
+    pub causal_role: Option<String>,
     pub created_at: String,
 }
 
@@ -49,7 +55,7 @@ impl Observation {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ObservationSourceType {
     UserMessage,
@@ -187,6 +193,8 @@ mod tests {
             observation_detail_json: None,
             extraction_batch_id: None,
             superseded_by: None,
+            cross_project_count: 1,
+            causal_role: None,
             created_at: "t".into(),
         }
     }

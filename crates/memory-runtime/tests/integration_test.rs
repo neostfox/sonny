@@ -133,6 +133,8 @@ fn test_full_pipeline_json_ingest_to_store() {
         surprise_score: 0.5,
         source_type: ObservationSourceType::UserMessage,
         consolidated: false,
+        cross_project_count: 1,
+        causal_role: None,
         created_at: chrono::Utc::now().to_rfc3339(),
     };
     obs_store.insert(&obs).unwrap();
@@ -314,6 +316,8 @@ fn test_batch_insert_and_query() {
             surprise_score: 0.5,
             source_type: ObservationSourceType::UserMessage,
             consolidated: false,
+            cross_project_count: 1,
+            causal_role: None,
             created_at: chrono::Utc::now().to_rfc3339(),
         })
         .collect();
@@ -384,6 +388,8 @@ fn test_multiple_stores_share_connection() {
         surprise_score: 0.0,
         source_type: ObservationSourceType::UserMessage,
         consolidated: false,
+        cross_project_count: 1,
+        causal_role: None,
         created_at: chrono::Utc::now().to_rfc3339(),
     };
     obs_store.insert(&obs).unwrap();
@@ -441,6 +447,8 @@ fn test_coclaim_links_same_batch_observations() {
         extraction_batch_id: batch.map(|b| b.to_string()),
         superseded_by: None,
         consolidated: false,
+        cross_project_count: 1,
+        causal_role: None,
         created_at: chrono::Utc::now().to_rfc3339(),
     };
 
@@ -593,6 +601,8 @@ fn test_find_coclaim_excludes_dead_statuses() {
         extraction_batch_id: Some("batch_x".to_string()),
         superseded_by: None,
         consolidated: false,
+        cross_project_count: 1,
+        causal_role: None,
         created_at: chrono::Utc::now().to_rfc3339(),
     };
     obs_store.insert_batch(&[mk(0), mk(1)]).unwrap();
@@ -665,6 +675,8 @@ async fn test_p4b_feedback_closes_recall_loop() {
             successful_recall_count: 0,
             failed_recall_count: 0,
             connection_count: 0,
+            lifecycle_scope: memory_runtime::models::scope::LifecycleScope::Project,
+            scope_key: None,
             created_at: chrono::Utc::now().to_rfc3339(),
             updated_at: chrono::Utc::now().to_rfc3339(),
         })
@@ -690,6 +702,8 @@ async fn test_p4b_feedback_closes_recall_loop() {
         observation_detail_json: None,
         extraction_batch_id: None,
         superseded_by: None,
+        cross_project_count: 1,
+        causal_role: None,
         created_at: chrono::Utc::now().to_rfc3339(),
     };
     obs_store.insert(&obs).unwrap();

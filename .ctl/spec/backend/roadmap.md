@@ -1,7 +1,10 @@
-# Roadmap
+# Roadmap（归档：P0–P4）
 
+> **状态：本文件已归档（2026-07）。** P0–P4 及后续 P5–P8 已全部完成并通过验收测试。
+>
+> **当前路线与状态见仓库根目录 [`TODO.md`](../../../TODO.md)。** 本文件不再扩展新任务。
+>
 > 基于代码评审（10 项 Critical/High）、设计差距分析（D1-D10）、设计评审（P1-P10）综合制定。
-> 每个阶段的前置依赖明确标注。未完成前置依赖的后续任务不可开始。
 
 ---
 
@@ -358,11 +361,13 @@ P1-C → P2-A → P3-D
 
 ## 验收里程碑
 
-| 里程碑 | 包含任务 | 验收标准 |
-|--------|---------|---------|
-| M0: 可运行 | P0 全部 | `cargo test` 在 Windows/macOS 通过；多 store 共享连接 |
-| M1: 设计就绪 | P1 全部 | MemoryItem 决策记录；Candidate 独立状态；Confidence 双维度设计文档 |
-| M2: 管道闭环 | P2 全部 | ingest → extract → validate → dedup → normalize → store；可重新提取 |
-| M3: 概念涌现 | P3-A, P3-B, P3-D | 多 session 输入 → 自动产出 ConceptCandidate（非人工创建） |
-| M4: 概念管理 | P3-C | 候选可合并/拆分；Concept 有 confidence 变化 |
-| M5: 闭环运行 | P4 全部 | query → recall → MemoryContext → 用户反馈 → confidence 更新 → 概念修正 |
+| 里程碑 | 包含任务 | 验收标准 | 状态 |
+|--------|---------|---------|------|
+| M0: 可运行 | P0 全部 | `cargo test` 在 Windows/macOS 通过；多 store 共享连接 | ✅ |
+| M1: 设计就绪 | P1 全部 | MemoryItem 决策记录；Candidate 独立状态；Confidence 双维度设计文档 | ✅ |
+| M2: 管道闭环 | P2 全部 | ingest → extract → validate → dedup → normalize → store；可重新提取 | ✅ |
+| M3: 概念涌现 | P3-A, P3-B, P3-D | 多 session 输入 → 自动产出 ConceptCandidate（非人工创建） | ✅ |
+| M4: 概念管理 | P3-C | 候选可合并/拆分；Concept 有 confidence 变化 | ✅ |
+| M5: 闭环运行 | P4 全部 | query → recall → MemoryContext → 用户反馈 → confidence 更新 → 概念修正 | ✅ |
+
+**后续（不属本归档文件）：** P5-A 概念关系边 → P6 概念分层 → P7 因果融合 → P8 结构迁移，均已完成。状态见 [`TODO.md`](../../../TODO.md)。

@@ -16,7 +16,7 @@ Spec documents for the Memory Runtime system — a concept-growth-based long-ter
 - [Roadmap](../backend/roadmap.md) — MVP phases, post-MVP enhancements, scale features (GNN, meta-learning), evaluation framework
 - [Design Reference](../backend/design-reference.md) — Backend design status and cross-cutting reference
 
-## Implementation Status (as of 2026-06-22)
+## Implementation Status (as of 2026-07)
 
 | Phase | Status | Notes |
 |-------|--------|-------|
@@ -26,12 +26,20 @@ Spec documents for the Memory Runtime system — a concept-growth-based long-ter
 | P2-B (Dedup/Normalize) | ✅ Complete | Predicate normalization, duplicate detection |
 | P2-C (Observation Co-occurrence) | ✅ Complete | extraction_batch_id, observation_coclaim table |
 | P2-D (Reverse Correction) | ✅ Complete | reextract(), prompt versioning, supersede mechanism |
+| P2-E (Predicate Vocabulary) | ✅ Complete | 7 canonical predicates + synonym normalize |
 | P3-A (Embedding Storage) | ✅ Complete | BLOB storage, cosine search, OpenAI-compatible provider |
 | P3-B (Cluster Engine) | ✅ Complete | HAC clustering, combined distance, entity+embedding |
 | P3-C (Merge/Split) | ✅ Complete | Candidate merging, Jaccard similarity, Union-Find |
+| P3-D (Confidence Integration) | ✅ Complete | Source-seeded α/β, dedup accumulation |
 | P4-A (Recall Engine) | ✅ Complete | Intent classification, entity match, semantic search, token budget, recall stats |
 | P4-B (Feedback) | ✅ Complete | feedback table + ledger, keyword classification, revision weights, Negate→rejected_hypothesis, Correct→supersede, closed recall loop (outcome from explicit feedback) |
 | P4-C (Time Awareness) | ✅ Complete | Ebbinghaus decay + rehearsal deceleration, last_recalled_at anchor, recency salience factor |
+| P5-A (Concept Relation) | ✅ Complete | concept_relation edges, edge-level Beta lifecycle, LinkEngine backfill |
+| P6 (Concept Layering) | ✅ Complete | lifecycle_scope, cross_project_count, promotion, cross-ws visibility, alias merge |
+| P7 (Causal Fusion) | ✅ Complete | causal_role, CausalStats do-statistics, heterogeneous evidence weights, LinkEngine causal path |
+| P8 (Structural Transfer) | ✅ Complete | WL structural fingerprints, cross-ws peer scan, transfer notes |
+
+Implementation branch: `feat/p6-p8-knowledge-compound`. Forward roadmap lives in [`TODO.md`](../../../TODO.md). P0–P4 phase detail is archived in [`../backend/roadmap.md`](../backend/roadmap.md).
 
 ## Quick Reference
 

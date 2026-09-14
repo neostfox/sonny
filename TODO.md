@@ -17,11 +17,12 @@
 | P6 | 概念分层 / 跨项目计数 / 推广 / 可见性 / 别名合并 | ✅ |
 | P7 | 因果角色 / do-充分统计量 / 异源证据权重 | ✅ |
 | P8 | WL 结构指纹 / 跨 workspace 迁移 notes | ✅ |
-| P10 | Dreaming 实体邻域离线巩固 | 本阶段 |
-| P11 | 隐式反馈 + 持久性三档 | 本阶段 |
-| P12 | Add 五操作 + Recall-aware 提取 | 本阶段 |
+| P10 | Dreaming 实体邻域离线巩固 | ✅ |
+| P11 | 隐式反馈 + 持久性三档 | ✅ |
+| P12 | Add 五操作 + Recall-aware 提取 | ✅ |
+| P13 | Compact Search（RRF + 双向图扩展） | ✅ |
 
-**定位：** 跨项目因果知识引擎。吸收 MindMemOS 的质量闭环（Dreaming / 隐式反馈 / Action Plan），不吸收其重型基础设施。
+**定位：** 跨项目因果知识引擎。吸收 MindMemOS 的质量闭环（Dreaming / 隐式反馈 / Action Plan / Compact Search），不吸收其重型基础设施。
 
 ### 关键入口
 
@@ -35,6 +36,7 @@
 | Dreaming | `pipeline/dream.rs` |
 | 持久性分类 | `models/persistence.rs` |
 | Add Action Plan | `pipeline/action_plan.rs` |
+| Compact Search | `recall/compact.rs` · `RecallEngine::compact_recall` |
 
 ### 验收测试
 
@@ -85,7 +87,22 @@
 
 ---
 
-## P13–P14（后续）
+## P13：Compact Search（RRF + 双向图检索）
+
+**来源：** MindMemOS Compact Search — 混合稀疏/稠密 RRF，图上前向（边邻居）+ 反向（共享实体）受限扩展。
+
+| ID | 任务 |
+|----|------|
+| P13-A | `recall/compact.rs`：lexical + dense RRF 融合种子 |
+| P13-B | Forward：`concept_relation` 邻居扩展 |
+| P13-C | Reverse：共享实体反向扩展 |
+| P13-D | `RecallEngine::compact_recall` 入口 + provenance |
+
+**验收：** 双通道都命中的概念排最前；有因果边的邻居能进结果；与无边概念区分。
+
+---
+
+## P14（后续）
 
 | 阶段 | 内容 | 状态 |
 |------|------|------|

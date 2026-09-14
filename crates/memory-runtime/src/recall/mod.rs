@@ -9,8 +9,10 @@ use crate::models::concept::Concept;
 use crate::models::embedding::EmbeddingSourceType;
 use crate::models::recall::{Intent, MemoryContext, RecallBudget, RecallScore};
 use crate::models::status::ConceptStatus;
-use crate::store::traits::{ConceptStore, EmbeddingStore};
+use crate::store::traits::{ConceptStore, EmbeddingStore, RelationStore};
 use crate::text::keyword_hit;
+
+pub mod compact;
 
 const DEFAULT_MAX_TOKENS: usize = 1500;
 const SEMANTIC_WEIGHT: f64 = 0.6;
@@ -99,6 +101,46 @@ where
             }
         }
 
+        context.token_count = estimate_tokens(&context.to_prompt());
+        Ok(context)
+    }
+
+    /// P13: Compact Search — hybrid RRF seed + bidirectional graph expansion.
+    /// Returns a MemoryContext like `recall`, but ranking comes from
+    /// [`compact::compact_search`] instead of the single-shot dual channel.
+    pub async fn compact_recall<R: RelationStore>(
+        &self,
+        query: &str,
+        workspace_id: &str,
+        relations: &R,
+        max_tokens: usize,
+    ) -> MemoryResult<MemoryContext> {
+        let intent = classify_intent(query);
+        let hits = compact::compact_search(
+            self.concepts,
+            self.embeddings,
+            self.provider,
+            relations,
+            workspace_id,
+            query,
+            8,
+            compact::DEFAULT_MAX_STEPS,
+            &self.include_domain_keys,
+            self.include_global,
+        )
+        .await?;
+        let ranked = compact::hits_to_recall_scores(&hits);
+        let concepts = self.load_ranked_concepts(&ranked)?;
+        let mut context = build_context(workspace_id, &intent, &concepts, max_tokens);
+        // Provenance: which path surfaced each concept (hybrid / forward / reverse).
+        for line in compact::format_hit_provenance(&hits, 3) {
+            context.relevant_entities.push(format!("[compact] {line}"));
+        }
+        if context.current_concept.is_some() {
+            for concept in concepts.iter().take(3) {
+                self.concepts.record_recall(&concept.concept_id)?;
+            }
+        }
         context.token_count = estimate_tokens(&context.to_prompt());
         Ok(context)
     }

@@ -522,6 +522,14 @@ mod tests {
         ) -> MemoryResult<i64> {
             Ok(1)
         }
+
+        fn set_consolidated(
+            &self,
+            _observation_id: &str,
+            _consolidated: bool,
+        ) -> MemoryResult<()> {
+            Ok(())
+        }
     }
 
     fn obs(id: &str, subject: &str, object: Option<&str>) -> Observation {

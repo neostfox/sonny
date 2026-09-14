@@ -75,6 +75,8 @@ pub trait ObservationStore: Send + Sync {
         predicate: &str,
         object: Option<&str>,
     ) -> MemoryResult<i64>;
+    /// P10: mark an observation as processed by dreaming (idempotent).
+    fn set_consolidated(&self, observation_id: &str, consolidated: bool) -> MemoryResult<()>;
 }
 
 pub trait ConceptStore: Send + Sync {

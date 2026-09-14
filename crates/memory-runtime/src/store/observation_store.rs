@@ -271,6 +271,15 @@ impl ObservationStore for SqliteObservationStore {
         tx.commit()?;
         Ok(count)
     }
+
+    fn set_consolidated(&self, observation_id: &str, consolidated: bool) -> MemoryResult<()> {
+        let conn = self.conn.lock();
+        let changed = conn.execute(
+            "UPDATE observation SET consolidated = ?1 WHERE observation_id = ?2",
+            params![consolidated, observation_id],
+        )?;
+        require_observation_row(changed, observation_id)
+    }
 }
 
 fn collect_rows(

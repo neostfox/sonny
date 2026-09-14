@@ -224,8 +224,9 @@ fn raw_to_observation(
     }
 }
 
-/// Extract observations and drop any already present in the store (matched by
-/// normalized subject + predicate + object). Caller inserts the returned batch.
+/// Extract observations and apply the P12 action plan against the store.
+/// Caller inserts the returned (Add) batch; Reinforce/Update/Merge/Skip are
+/// applied here so extract never blindly inserts duplicates.
 pub async fn extract_and_dedup<S: ObservationStore>(
     raw_memories: &[RawMemory],
     llm: &impl LlmProvider,
@@ -235,28 +236,73 @@ pub async fn extract_and_dedup<S: ObservationStore>(
     let mut kept = Vec::with_capacity(extracted.len());
     let mut duplicates = 0;
     for obs in extracted {
-        if let Some(existing) = store.find_duplicate(
-            &obs.subject_text,
-            &obs.predicate,
-            obs.object_text.as_deref(),
-            &obs.workspace_id,
-        )? {
-            // Re-encountered fact: accumulate evidence on the existing observation
-            // (P3-D). The fresh duplicate is dropped; the original strengthens.
-            let mut bc =
-                BetaConfidence::with_values(existing.evidence_alpha, existing.evidence_beta);
-            bc.update(&EvidenceType::RepeatedOccurrence);
-            store.update_confidence(&existing.observation_id, bc.alpha, bc.beta)?;
-            duplicates += 1;
-        } else {
-            // P6-B: same triple may already live in another workspace — keep
-            // cross_project_count coherent before the caller inserts this row.
-            store.sync_cross_project_count(
-                &obs.subject_text,
-                &obs.predicate,
-                obs.object_text.as_deref(),
-            )?;
-            kept.push(obs);
+        // Gather related live rows for the planner (same subject or object).
+        let mut related = store.find_by_entity(&obs.subject_text, &obs.workspace_id)?;
+        if let Some(o) = obs.object_text.as_deref().filter(|s| !s.is_empty()) {
+            related.extend(store.find_by_entity(o, &obs.workspace_id)?);
+        }
+        let action = crate::pipeline::action_plan::plan_memory_action(&obs, &related);
+        match action {
+            crate::pipeline::action_plan::MemoryAction::Skip => {
+                tracing::debug!(observation_id = %obs.observation_id, "action_plan skip");
+            }
+            crate::pipeline::action_plan::MemoryAction::Reinforce => {
+                if let Some(existing) = store.find_duplicate(
+                    &obs.subject_text,
+                    &obs.predicate,
+                    obs.object_text.as_deref(),
+                    &obs.workspace_id,
+                )? {
+                    let mut bc = BetaConfidence::with_values(
+                        existing.evidence_alpha,
+                        existing.evidence_beta,
+                    );
+                    bc.update(&EvidenceType::RepeatedOccurrence);
+                    store.update_confidence(&existing.observation_id, bc.alpha, bc.beta)?;
+                    duplicates += 1;
+                }
+            }
+            crate::pipeline::action_plan::MemoryAction::Update => {
+                // Object revised for same subject+predicate: supersede the old row.
+                if let Some(old) = related.iter().find(|o| {
+                    o.subject_text == obs.subject_text && o.predicate == obs.predicate
+                }) {
+                    store.supersede(&old.observation_id, &format!("update:{}", obs.observation_id))?;
+                    store.sync_cross_project_count(
+                        &obs.subject_text,
+                        &obs.predicate,
+                        obs.object_text.as_deref(),
+                    )?;
+                    kept.push(obs);
+                } else {
+                    kept.push(obs);
+                }
+            }
+            crate::pipeline::action_plan::MemoryAction::Merge => {
+                // Related predicates on same subject+object: reinforce the live one.
+                if let Some(existing) = related
+                    .iter()
+                    .find(|o| o.subject_text == obs.subject_text && o.object_text == obs.object_text)
+                {
+                    let mut bc = BetaConfidence::with_values(
+                        existing.evidence_alpha,
+                        existing.evidence_beta,
+                    );
+                    bc.update(&EvidenceType::RepeatedOccurrence);
+                    store.update_confidence(&existing.observation_id, bc.alpha, bc.beta)?;
+                    duplicates += 1;
+                } else {
+                    kept.push(obs);
+                }
+            }
+            crate::pipeline::action_plan::MemoryAction::Add => {
+                store.sync_cross_project_count(
+                    &obs.subject_text,
+                    &obs.predicate,
+                    obs.object_text.as_deref(),
+                )?;
+                kept.push(obs);
+            }
         }
     }
     if duplicates > 0 {

@@ -5,6 +5,7 @@ pub mod evidence;
 pub mod feedback;
 pub mod hierarchy;
 pub mod observation;
+pub mod persistence;
 pub mod predicate;
 pub mod raw_memory;
 pub mod recall;

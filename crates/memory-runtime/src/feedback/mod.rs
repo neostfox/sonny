@@ -121,6 +121,23 @@ impl FeedbackEngine {
         };
 
         // ---- Pure phase: compute the new concept, observation op, ledger row ----
+        // P11: task-temporary corrections must not mutate durable memory.
+        let persistence = crate::models::persistence::classify_persistence(feedback_text);
+        if !persistence.is_durable() {
+            tracing::info!(
+                workspace_id,
+                concept_id,
+                persistence = persistence.as_str(),
+                "feedback marked task-temporary; skipping durable revision"
+            );
+            return Ok(FeedbackResult {
+                feedback_type: FeedbackType::General,
+                concept_id: concept_id.to_string(),
+                new_confidence: concept.confidence,
+                status_changed: false,
+                new_status: None,
+            });
+        }
         let feedback_type = classify_feedback(feedback_text);
         let (alpha_delta, beta_delta) = feedback_type.revision_weights();
 

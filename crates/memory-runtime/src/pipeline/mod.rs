@@ -1,4 +1,6 @@
+pub mod action_plan;
 pub mod cluster;
+pub mod dream;
 pub mod extract;
 pub mod ingest;
 pub mod link;

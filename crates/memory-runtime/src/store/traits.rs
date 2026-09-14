@@ -9,6 +9,7 @@ use crate::models::raw_memory::RawMemory;
 use crate::models::relation::ConceptRelation;
 use crate::models::scope::LifecycleScope;
 use crate::models::status::{CandidateStatus, ConceptStatus, ObservationStatus};
+use crate::models::timeline::TimelineEntry;
 
 pub trait RawMemoryStore: Send + Sync {
     fn insert(&self, raw: &RawMemory) -> MemoryResult<()>;
@@ -232,4 +233,42 @@ pub trait EmbeddingStore: Send + Sync {
     ) -> MemoryResult<Vec<EmbeddingSearchResult>>;
     fn get_embedding(&self, source_type: &str, source_id: &str) -> MemoryResult<Option<Vec<f32>>>;
     fn delete(&self, source_type: &str, source_id: &str) -> MemoryResult<()>;
+}
+
+/// P14: entity–property version history (not overwrite).
+pub trait TimelineStore: Send + Sync {
+    fn get_active(
+        &self,
+        workspace_id: &str,
+        entity: &str,
+        property: &str,
+    ) -> MemoryResult<Option<TimelineEntry>>;
+    fn history(
+        &self,
+        workspace_id: &str,
+        entity: &str,
+        property: &str,
+    ) -> MemoryResult<Vec<TimelineEntry>>;
+    fn history_for_entity(
+        &self,
+        workspace_id: &str,
+        entity: &str,
+    ) -> MemoryResult<Vec<TimelineEntry>>;
+    /// New active version; previous active becomes superseded with `valid_to` set.
+    fn append_version(
+        &self,
+        workspace_id: &str,
+        entity: &str,
+        property: &str,
+        value: Option<&str>,
+        observation_id: Option<&str>,
+        now: &str,
+    ) -> MemoryResult<TimelineEntry>;
+    fn expire_active(
+        &self,
+        workspace_id: &str,
+        entity: &str,
+        property: &str,
+        now: &str,
+    ) -> MemoryResult<()>;
 }

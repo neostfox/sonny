@@ -21,8 +21,9 @@
 | P11 | 隐式反馈 + 持久性三档 | ✅ |
 | P12 | Add 五操作 + Recall-aware 提取 | ✅ |
 | P13 | Compact Search（RRF + 双向图扩展） | ✅ |
+| P14 | Entity–Property 时间线（版本史 + 过期） | ✅ |
 
-**定位：** 跨项目因果知识引擎。吸收 MindMemOS 的质量闭环（Dreaming / 隐式反馈 / Action Plan / Compact Search），不吸收其重型基础设施。
+**定位：** 跨项目因果知识引擎。吸收 MindMemOS 的质量闭环（Dreaming / 隐式反馈 / Action Plan / Compact Search / Timeline），不吸收其重型基础设施。
 
 ### 关键入口
 
@@ -37,11 +38,12 @@
 | 持久性分类 | `models/persistence.rs` |
 | Add Action Plan | `pipeline/action_plan.rs` |
 | Compact Search | `recall/compact.rs` · `RecallEngine::compact_recall` |
+| Entity-Property 时间线 | `models/timeline.rs` · `store/timeline_store.rs` · `pipeline/timeline.rs` |
 
 ### 验收测试
 
 - `p6_layering_test` / `p7_causal_fusion_test` / `p8_transfer_test`
-- `p10_dreaming_test` / `p11_persistence_test` / `p12_action_plan_test`
+- `p10_12_quality_loop_test` / `p13_compact_search_test` / `p14_timeline_test`
 
 ---
 
@@ -102,16 +104,24 @@
 
 ---
 
-## P14（后续）
+## P14：Entity–Property 时间线
 
-| 阶段 | 内容 | 状态 |
-|------|------|------|
-| P13 | Compact Search：多步 agentic + RRF + 双向边遍历 | 待做 |
-| P14 | Entity-Property 时间线（版本史 + 过期） | 待做 |
+**来源：** MindMemOS 三维记忆 — 同一 `(entity, property)` 的 successive 记录形成时间线；改偏好不是 overwrite。
 
-### 可选增强
+| ID | 任务 |
+|----|------|
+| P14-A | `entity_property_timeline` 表（active/expired/superseded + valid_from/to） |
+| P14-B | `TimelineStore::append_version`：新版本激活，旧版本 supersede |
+| P14-C | `record_from_observation` / `sync_timeline_for_batch` 接入提取 |
+
+**验收：** 值更新后 history 保留旧版本；仅一条 active；与 Observation Beta 并存（版本史 vs 可信度）。
+
+---
+
+## 后续可选
 
 - Domain 权威来源、Predictive Coding、Adversarial LLM、sqlite-vec、Skill 轨迹演化
+- CLI/编排：`sonny dream` / `compact recall` / `promote` / `timeline`
 
 ---
 
@@ -121,4 +131,4 @@
 2. **跨项目验证 > 单项目重复。**
 3. **结构 > 名字。**
 4. **异源证据不应该等权。**
-5. **客户端是证据提供者，Sonny 是因果推断引擎。** — Dreaming/Action Plan 在引擎内；Skill 演化留给客户端。
+5. **客户端是证据提供者，Sonny 是因果推断引擎。** — Dreaming/Action Plan/Timeline 在引擎内；Skill 演化留给客户端。

@@ -263,7 +263,8 @@ pub async fn extract_and_dedup<S: ObservationStore>(
                 }
             }
             crate::pipeline::action_plan::MemoryAction::Update => {
-                // Object revised for same subject+predicate: supersede the old row.
+                // Object revised for same subject+predicate: supersede the old row
+                // and append a new timeline version (P14 — no overwrite).
                 if let Some(old) = related.iter().find(|o| {
                     o.subject_text == obs.subject_text && o.predicate == obs.predicate
                 }) {
@@ -311,6 +312,21 @@ pub async fn extract_and_dedup<S: ObservationStore>(
         );
     }
     Ok(kept)
+}
+
+/// P14: same as `extract_and_dedup`, then sync the entity–property timeline
+/// for every returned (Add/Update) observation. Call after inserting `kept`.
+pub fn sync_timeline_for_batch<T: crate::store::traits::TimelineStore>(
+    timeline: &T,
+    observations: &[Observation],
+    now: &str,
+) -> MemoryResult<usize> {
+    let mut n = 0;
+    for obs in observations {
+        crate::pipeline::timeline::record_from_observation(timeline, obs, now)?;
+        n += 1;
+    }
+    Ok(n)
 }
 
 /// P2-D: outcome of [`reextract`] — the fresh batch (already inserted) and how many

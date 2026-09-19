@@ -1,0 +1,110 @@
+{
+  "observations": [
+    {
+      "id": "boe-har-package-deps",
+      "workspace": "boemenhu",
+      "subject": "bytecode_har",
+      "predicate": "depends_on",
+      "object": "module_oh_package_dependencies",
+      "evidence": "字节码 HAR 使用的依赖包 XXX 必须配置在本模块的 oh-package.json5 dependencies 或 dynamicDependencies 中，不能只配在工程级。错误表现为 cannot find record 推包调试 jscrash。",
+      "source": "file_evidence",
+      "causal_role": "observed_association"
+    },
+    {
+      "id": "boe-har-project-only-deps",
+      "workspace": "boemenhu",
+      "subject": "project_level_oh_package_only_deps",
+      "predicate": "causes",
+      "object": "cannot_find_record_crash",
+      "evidence": "错误地把 HAR 依赖配置在工程级 oh-package.json5，而模块级缺失，会导致推包调试 cannot find record 与 jscrash。",
+      "source": "file_evidence",
+      "causal_role": "observed_association"
+    },
+    {
+      "id": "boe-hsp-to-har-packageType",
+      "workspace": "boemenhu",
+      "subject": "hsp_to_har_conversion",
+      "predicate": "causes",
+      "object": "dependency_not_resolved",
+      "evidence": "将 HSP 包转成 HAR 后未删除 packageType InterfaceHar，字节码打包时不会解析相关依赖，应按 HSP 转 HAR 指导删除该字段。",
+      "source": "file_evidence",
+      "causal_role": "observed_association"
+    },
+    {
+      "id": "boe-version-mismatch-override",
+      "workspace": "boemenhu",
+      "subject": "package_version_mismatch",
+      "predicate": "related_to",
+      "object": "project_oh_package_overrides",
+      "evidence": "工程级与模块级同时依赖 XXX 包不同版本时，可用 overrides 覆盖模块版本，或手工对齐 version。",
+      "source": "file_evidence",
+      "causal_role": null
+    },
+    {
+      "id": "boe-incremental-build-clean",
+      "workspace": "boemenhu",
+      "subject": "incremental_build_version_change",
+      "predicate": "causes",
+      "object": "stale_path_not_found",
+      "evidence": "依赖包使用增量构建且修改了模块级 version 时，部分文件仍用旧版本号寻址导致找不到；需 Clean Project 后重建。",
+      "source": "file_evidence",
+      "causal_role": "observed_association"
+    },
+    {
+      "id": "boe-third-party-obfuscation",
+      "workspace": "boemenhu",
+      "subject": "third_party_obfuscation_sdk",
+      "predicate": "causes",
+      "object": "code_not_recognized",
+      "evidence": "不兼容的三方插件/SDK（混淆、加固）会修改代码导致无法识别，需升级或联系供应商解决。",
+      "source": "file_evidence",
+      "causal_role": "observed_association"
+    }
+  ],
+  "concepts": [
+    {
+      "id": "c-boe-har-debug",
+      "workspace": "boemenhu",
+      "name": "HarmonyOS HAR 推包 cannot find record 排查",
+      "definition": "字节码 HAR / HSP 依赖与版本导致的调试崩溃排查模式",
+      "entities": ["bytecode_har", "oh-package.json5", "cannot_find_record", "packageType", "project_level_oh_package_only_deps", "hsp_to_har_conversion", "package_version_mismatch", "third_party_obfuscation_sdk"],
+      "lifecycle_scope": "project",
+      "scope_key": "harmonyos",
+      "confidence": 0.88
+    },
+    {
+      "id": "c-boe-build-clean",
+      "workspace": "boemenhu",
+      "name": "增量构建版本漂移与 Clean Project",
+      "definition": "version 变更 + 增量构建导致旧路径寻址",
+      "entities": ["incremental_build", "Clean Project", "version", "incremental_build_version_change", "stale_path_not_found"],
+      "lifecycle_scope": "project",
+      "scope_key": "harmonyos",
+      "confidence": 0.8
+    },
+    {
+      "id": "c-boe-runtime-fault",
+      "workspace": "boemenhu",
+      "name": "HAR 运行时故障表现",
+      "definition": "cannot find record / dependency not resolved / code not recognized",
+      "entities": ["cannot_find_record", "dependency_not_resolved", "code_not_recognized", "module_oh_package_dependencies", "stale_path_not_found"],
+      "lifecycle_scope": "project",
+      "scope_key": "harmonyos",
+      "confidence": 0.84
+    }
+  ],
+  "relations": [
+    {
+      "src": "c-boe-har-debug",
+      "dst": "c-boe-runtime-fault",
+      "relation_type": "causal",
+      "workspace": "boemenhu"
+    },
+    {
+      "src": "c-boe-build-clean",
+      "dst": "c-boe-runtime-fault",
+      "relation_type": "causal",
+      "workspace": "boemenhu"
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 pub mod action_plan;
 pub mod cluster;
+pub mod corpus;
 pub mod dream;
 pub mod extract;
 pub mod ingest;

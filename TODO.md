@@ -22,7 +22,8 @@
 | P12 | Add 五操作 + Recall-aware 提取 | ✅ |
 | P13 | Compact Search（RRF + 双向图扩展） | ✅ |
 | P14 | Entity–Property 时间线（版本史 + 过期） | ✅ |
-| CLI | dream / promote / recall-compact / timeline 编排 | ✅ |
+| CLI | dream / promote / recall-compact / timeline / seed / extract / link / transfer / feedback / consolidate | ✅ |
+| G1 用例 seed | `examples/corpus` — boemenhu / schedule / sonny-principles | ✅ |
 
 **定位：** 跨项目因果知识引擎。吸收 MindMemOS 的质量闭环（Dreaming / 隐式反馈 / Action Plan / Compact Search / Timeline），不吸收其重型基础设施。
 

@@ -1,0 +1,130 @@
+{
+  "observations": [
+    {
+      "id": "sch-ontology-loop",
+      "workspace": "schedule",
+      "subject": "schedule_ontology",
+      "predicate": "related_to",
+      "object": "data_fetch_iteration",
+      "evidence": "本体发现与取数可以往返迭代：取数发现的事实可以修正本体。",
+      "source": "file_evidence",
+      "causal_role": null
+    },
+    {
+      "id": "sch-verify-fail-revise",
+      "workspace": "schedule",
+      "subject": "result_verification_failure",
+      "predicate": "causes",
+      "object": "model_revise_problem_spec",
+      "evidence": "结果核对失败后，模型可依据明确反馈修订 ProblemSpec 并重新求解。",
+      "source": "file_evidence",
+      "causal_role": "observed_association"
+    },
+    {
+      "id": "sch-no-preset-ontology",
+      "workspace": "schedule",
+      "subject": "customer_ontology",
+      "predicate": "not_has",
+      "object": "preset_full_answer",
+      "evidence": "不预置完整客户本体或手写客户排产答案作为模型初始知识。",
+      "source": "file_evidence",
+      "causal_role": null
+    },
+    {
+      "id": "sch-missing-data-ask",
+      "workspace": "schedule",
+      "subject": "missing_hard_constraints",
+      "predicate": "causes",
+      "object": "ask_business_confirmation",
+      "evidence": "资料没有说明的硬限制、库存状态和目标优先级，向业务确认，不凭常识补成事实。",
+      "source": "file_evidence",
+      "causal_role": "observed_association"
+    },
+    {
+      "id": "sch-shared-resource-bottleneck",
+      "workspace": "schedule",
+      "subject": "shared_resource_competition",
+      "predicate": "causes",
+      "object": "schedule_conflict",
+      "evidence": "首个业务案例必须有共享资源竞争、上游供料限制和客户交付要求。",
+      "source": "file_evidence",
+      "causal_role": "observed_association"
+    },
+    {
+      "id": "sch-array-cell-module",
+      "workspace": "schedule",
+      "subject": "array_process",
+      "predicate": "related_to",
+      "object": "cell_to_module_flow",
+      "evidence": "Array → Cell → 模组三段，少量产品和瓶颈资源组；按日规划。",
+      "source": "file_evidence",
+      "causal_role": null
+    },
+    {
+      "id": "sch-goal-not-preset",
+      "workspace": "schedule",
+      "subject": "customer_goal",
+      "predicate": "not_has",
+      "object": "preset_delivery_cost_weights",
+      "evidence": "目标由客户制定；不预设交期、库存或成本的权重。",
+      "source": "file_evidence",
+      "causal_role": null
+    },
+    {
+      "id": "sch-readonly-data",
+      "workspace": "schedule",
+      "subject": "data_source",
+      "predicate": "has",
+      "object": "readonly_constraint",
+      "evidence": "数据源只读；生成代码沿用现成隔离执行能力，不能写源数据或读取凭据。",
+      "source": "file_evidence",
+      "causal_role": null
+    }
+  ],
+  "concepts": [
+    {
+      "id": "c-sch-ontology-loop",
+      "workspace": "schedule",
+      "name": "排产本体与取数迭代",
+      "definition": "本体发现 ↔ 取数事实往返修正",
+      "entities": ["ontology", "data_fetch", "ProblemSpec", "result_verification_failure", "model_revise_problem_spec", "data_fetch_iteration"],
+      "lifecycle_scope": "project",
+      "scope_key": "scheduling",
+      "confidence": 0.9
+    },
+    {
+      "id": "c-sch-verify-loop",
+      "workspace": "schedule",
+      "name": "结果核对失败修订环",
+      "definition": "verify fail → revise ProblemSpec → re-solve",
+      "entities": ["verification", "ProblemSpec", "revision", "result_verification_failure", "model_revise_problem_spec"],
+      "lifecycle_scope": "project",
+      "scope_key": "scheduling",
+      "confidence": 0.88
+    },
+    {
+      "id": "c-sch-resource-conflict",
+      "workspace": "schedule",
+      "name": "共享资源竞争与供料约束",
+      "definition": "Array-Cell-模组场景的冲突来源",
+      "entities": ["shared_resource", "upstream_supply", "delivery", "shared_resource_competition", "schedule_conflict", "customer_delivery"],
+      "lifecycle_scope": "project",
+      "scope_key": "scheduling",
+      "confidence": 0.85
+    }
+  ],
+  "relations": [
+    {
+      "src": "c-sch-ontology-loop",
+      "dst": "c-sch-verify-loop",
+      "relation_type": "causal",
+      "workspace": "schedule"
+    },
+    {
+      "src": "c-sch-resource-conflict",
+      "dst": "c-sch-verify-loop",
+      "relation_type": "causal",
+      "workspace": "schedule"
+    }
+  ]
+}

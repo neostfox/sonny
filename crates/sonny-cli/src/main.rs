@@ -115,6 +115,60 @@ enum Commands {
         max_tokens: usize,
     },
 
+    /// Extract observations from ingested raw memories (requires LLM key)
+    Extract {
+        #[arg(long, default_value = "default")]
+        workspace: String,
+        /// Only this session id
+        #[arg(long)]
+        session: Option<String>,
+    },
+
+    /// Re-extract a session with current prompt version
+    Reextract {
+        session_id: String,
+    },
+
+    /// LinkEngine: backfill concept_relation edges
+    Link {
+        #[arg(long, default_value = "default")]
+        workspace: String,
+    },
+
+    /// Structural transfer notes for a concept
+    Transfer {
+        concept_id: String,
+        #[arg(long, default_value = "default")]
+        workspace: String,
+    },
+
+    /// Apply user feedback to a concept
+    Feedback {
+        concept_id: String,
+        /// Feedback text (confirm/negate/correct/preference...)
+        text: String,
+        #[arg(long, default_value = "default")]
+        workspace: String,
+        /// Target observation for negate/correct
+        #[arg(long)]
+        observation: Option<String>,
+    },
+
+    /// Offline consolidate: dream + link + promote scan for a workspace
+    Consolidate {
+        #[arg(long, default_value = "default")]
+        workspace: String,
+        /// Domain key used if promotion fires
+        #[arg(long)]
+        domain: Option<String>,
+    },
+
+    /// Seed a pre-structured corpus JSON bundle (no LLM)
+    Seed {
+        /// Path to corpus JSON file or directory of *.json
+        path: PathBuf,
+    },
+
     /// Entity–property timeline
     Timeline {
         #[command(subcommand)]
@@ -371,6 +425,223 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .await?;
             println!("{}", ctx.to_prompt());
             println!("\n--- tokens ≈ {} ---", ctx.token_count);
+        }
+        Commands::Extract { workspace, session } => {
+            let settings = Settings::load();
+            let llm = memory_runtime::llm::openai::OpenAiCompatibleLlmProvider::new(
+                &settings.llm.api_url,
+                &settings.llm.api_key,
+                &settings.llm.model,
+                Duration::from_secs(settings.llm.timeout_secs.max(10)),
+            )?;
+            let db = open_db(db_path.as_ref())?;
+            let raw_store = SqliteRawMemoryStore::new(db.conn.clone());
+            let obs_store = SqliteObservationStore::new(db.conn.clone());
+            let timeline = SqliteTimelineStore::new(db.conn.clone());
+            let raws = match &session {
+                Some(sid) => raw_store.get_by_session(sid)?,
+                None => raw_store.list_by_workspace(&workspace, 10_000)?,
+            };
+            if raws.is_empty() {
+                println!("No raw memories to extract");
+                return Ok(());
+            }
+            let kept = memory_runtime::pipeline::extract::extract_and_dedup(
+                &raws,
+                &llm,
+                &obs_store,
+            )
+            .await?;
+            let now = chrono::Utc::now().to_rfc3339();
+            let mut inserted = 0usize;
+            for obs in &kept {
+                obs_store.insert(obs)?;
+                inserted += 1;
+                let _ = memory_runtime::pipeline::timeline::record_from_observation(
+                    &timeline, obs, &now,
+                );
+            }
+            println!(
+                "Extract: raw={}, kept_for_insert={inserted}, reinforced/updated in-place={}",
+                raws.len(),
+                raws.len() - kept.len()
+            );
+        }
+        Commands::Reextract { session_id } => {
+            let settings = Settings::load();
+            let llm = memory_runtime::llm::openai::OpenAiCompatibleLlmProvider::new(
+                &settings.llm.api_url,
+                &settings.llm.api_key,
+                &settings.llm.model,
+                Duration::from_secs(settings.llm.timeout_secs.max(10)),
+            )?;
+            let db = open_db(db_path.as_ref())?;
+            let raw_store = SqliteRawMemoryStore::new(db.conn.clone());
+            let obs_store = SqliteObservationStore::new(db.conn.clone());
+            let outcome =
+                memory_runtime::pipeline::extract::reextract(&session_id, &llm, &raw_store, &obs_store)
+                    .await?;
+            println!(
+                "Reextract {session_id}: new={}, superseded={}",
+                outcome.new_observations.len(),
+                outcome.superseded
+            );
+        }
+        Commands::Link { workspace } => {
+            let db = open_db(db_path.as_ref())?;
+            let concepts = SqliteConceptStore::new(db.conn.clone());
+            let observations = SqliteObservationStore::new(db.conn.clone());
+            let relations = SqliteRelationStore::new(db.conn.clone());
+            let report = memory_runtime::pipeline::link::LinkEngine::new().link_workspace(
+                &workspace,
+                &concepts,
+                &observations,
+                &relations,
+            )?;
+            println!(
+                "Link {workspace}: causal={}, shared_entity={}, coclaim={}, skipped_hot_entity={}",
+                report.causal_evidence,
+                report.shared_entity_evidence,
+                report.coclaim_evidence,
+                report.shared_entity_skipped
+            );
+        }
+        Commands::Transfer {
+            concept_id,
+            workspace,
+        } => {
+            let db = open_db(db_path.as_ref())?;
+            let concepts = SqliteConceptStore::new(db.conn.clone());
+            let observations = SqliteObservationStore::new(db.conn.clone());
+            let relations = SqliteRelationStore::new(db.conn.clone());
+            let peers = memory_runtime::pipeline::transfer::find_structural_peers(
+                &concepts,
+                &observations,
+                &relations,
+                &workspace,
+                &concept_id,
+                memory_runtime::pipeline::transfer::DEFAULT_PEER_SIMILARITY,
+                memory_runtime::pipeline::transfer::DEFAULT_WL_ROUNDS,
+            )?;
+            let notes = memory_runtime::pipeline::transfer::format_transfer_notes(&peers, 12);
+            if notes.is_empty() {
+                println!("No structural peers for {concept_id} in {workspace}");
+            } else {
+                for n in notes {
+                    println!("{n}");
+                }
+            }
+        }
+        Commands::Feedback {
+            concept_id,
+            text,
+            workspace,
+            observation,
+        } => {
+            let db = open_db(db_path.as_ref())?;
+            let engine = memory_runtime::feedback::FeedbackEngine::new(db.conn.clone());
+            let result =
+                engine.apply_feedback(&workspace, &concept_id, &text, observation.as_deref())?;
+            println!(
+                "Feedback applied: type={:?}, new_confidence={:.3}, status_changed={}",
+                result.feedback_type, result.new_confidence, result.status_changed
+            );
+        }
+        Commands::Consolidate { workspace, domain } => {
+            let db = open_db(db_path.as_ref())?;
+            let obs_store = SqliteObservationStore::new(db.conn.clone());
+            let concepts = SqliteConceptStore::new(db.conn.clone());
+            let relations = SqliteRelationStore::new(db.conn.clone());
+
+            let dream = dream_workspace(&obs_store, &workspace)?;
+            println!(
+                "[1/3 dream] neighborhoods={}, merges={}, softenings={}, archived={}",
+                dream.neighborhoods, dream.merges, dream.softenings, dream.archived
+            );
+
+            let link = memory_runtime::pipeline::link::LinkEngine::new().link_workspace(
+                &workspace,
+                &concepts,
+                &obs_store,
+                &relations,
+            )?;
+            println!(
+                "[2/3 link] causal={}, shared_entity={}, coclaim={}",
+                link.causal_evidence, link.shared_entity_evidence, link.coclaim_evidence
+            );
+
+            let mut promoted = 0usize;
+            let now = chrono::Utc::now().to_rfc3339();
+            for c in concepts.list_concepts(&workspace, None)? {
+                if c.lifecycle_scope.as_str() != "project" {
+                    continue;
+                }
+                // Count distinct workspaces sharing this concept's entities via observations.
+                let entities: Vec<String> = c
+                    .related_entities_json
+                    .as_deref()
+                    .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok())
+                    .unwrap_or_default();
+                let mut xproj = 1i64;
+                for e in entities.iter().take(3) {
+                    for o in obs_store.find_by_entity(e, &workspace)? {
+                        let n = obs_store.sync_cross_project_count(
+                            &o.subject_text,
+                            &o.predicate,
+                            o.object_text.as_deref(),
+                        )?;
+                        xproj = xproj.max(n);
+                    }
+                }
+                let report = maybe_promote_concept(
+                    &concepts,
+                    &c.concept_id,
+                    xproj,
+                    0,
+                    &PromotionThresholds::default(),
+                    domain.as_deref(),
+                    &now,
+                )?;
+                if report.to.is_some() {
+                    promoted += 1;
+                    println!(
+                        "  promoted {} → {:?}",
+                        c.concept_id,
+                        report.to.unwrap().as_str()
+                    );
+                }
+            }
+            println!("[3/3 promote] scanned, promoted={promoted}");
+        }
+        Commands::Seed { path } => {
+            let db = open_db(db_path.as_ref())?;
+            let mut bundles = Vec::new();
+            if path.is_dir() {
+                for entry in std::fs::read_dir(&path)? {
+                    let p = entry?.path();
+                    if p.extension().and_then(|e| e.to_str()) == Some("json") {
+                        bundles.push(p);
+                    }
+                }
+            } else {
+                bundles.push(path.clone());
+            }
+            bundles.sort();
+            if bundles.is_empty() {
+                eprintln!("No seed JSON files under {}", path.display());
+                std::process::exit(1);
+            }
+            for b in bundles {
+                let bundle = memory_runtime::pipeline::corpus::load_bundle(&b)?;
+                let report = memory_runtime::pipeline::corpus::apply_bundle(&db, &bundle)?;
+                println!(
+                    "Seeded {}: observations={}, concepts={}, relations={}",
+                    b.file_name().and_then(|n| n.to_str()).unwrap_or("?"),
+                    report.observations,
+                    report.concepts,
+                    report.relations
+                );
+            }
         }
         Commands::Timeline { cmd } => {
             let db = open_db(db_path.as_ref())?;

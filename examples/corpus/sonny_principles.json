@@ -1,0 +1,94 @@
+{
+  "observations": [
+    {
+      "id": "sonny-cross-project-beats-repeat",
+      "workspace": "sonny-dev",
+      "subject": "cross_project_validation",
+      "predicate": "related_to",
+      "object": "knowledge_compound",
+      "evidence": "跨项目验证 > 单项目重复：一条在 5 个项目各验证 1 次的知识，比单项目重复 5 次更有价值。",
+      "source": "user_confirm",
+      "causal_role": "observed_association"
+    },
+    {
+      "id": "sonny-structure-beats-name",
+      "workspace": "sonny-dev",
+      "subject": "structural_isomorphism",
+      "predicate": "related_to",
+      "object": "causal_same_class",
+      "evidence": "结构 > 名字：两个模块叫不同名字但因果依赖结构相同，在因果意义上是同一类。",
+      "source": "user_confirm",
+      "causal_role": "observed_association"
+    },
+    {
+      "id": "sonny-hetero-evidence",
+      "workspace": "sonny-dev",
+      "subject": "heterogeneous_evidence",
+      "predicate": "not_related_to",
+      "object": "equal_weights",
+      "evidence": "异源证据不应该等权：ctl gate 干预证据远大于 Obsidian 关联暗示。",
+      "source": "user_confirm",
+      "causal_role": null
+    },
+    {
+      "id": "sonny-client-evidence-provider",
+      "workspace": "sonny-dev",
+      "subject": "coding_agent_client",
+      "predicate": "related_to",
+      "object": "evidence_provider",
+      "evidence": "客户端是证据提供者，Sonny 是因果推断引擎；提取/格式化属于客户端适配层。",
+      "source": "user_confirm",
+      "causal_role": null
+    },
+    {
+      "id": "sonny-dream-entity-neighborhood",
+      "workspace": "sonny-dev",
+      "subject": "dreaming",
+      "predicate": "related_to",
+      "object": "entity_neighborhood_consolidation",
+      "evidence": "Dreaming 按实体邻域 detect→act，而非全局比对；标记 consolidated 防重复处理。",
+      "source": "user_confirm",
+      "causal_role": null
+    },
+    {
+      "id": "sonny-temp-feedback-not-durable",
+      "workspace": "sonny-dev",
+      "subject": "task_temporary_correction",
+      "predicate": "not_related_to",
+      "object": "durable_memory_write",
+      "evidence": "任务级临时纠正不应写入 durable 记忆；PersistenceScope 三档拦截。",
+      "source": "user_confirm",
+      "causal_role": "observed_association"
+    }
+  ],
+  "concepts": [
+    {
+      "id": "c-sonny-principles",
+      "workspace": "sonny-dev",
+      "name": "Sonny 知识复利原则",
+      "definition": "跨项目验证、结构>名字、异源不等权、客户端证据提供者",
+      "entities": ["cross_project", "structure", "evidence_weight"],
+      "lifecycle_scope": "global",
+      "scope_key": null,
+      "confidence": 0.92
+    },
+    {
+      "id": "c-sonny-mindmemos-quality",
+      "workspace": "sonny-dev",
+      "name": "MindMemOS 质量闭环吸收",
+      "definition": "Dreaming / 持久性 / Action Plan / Compact Search / Timeline",
+      "entities": ["dreaming", "persistence", "action_plan", "compact_search", "timeline"],
+      "lifecycle_scope": "global",
+      "scope_key": null,
+      "confidence": 0.9
+    }
+  ],
+  "relations": [
+    {
+      "src": "c-sonny-principles",
+      "dst": "c-sonny-mindmemos-quality",
+      "relation_type": "causal",
+      "workspace": "sonny-dev"
+    }
+  ]
+}

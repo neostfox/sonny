@@ -233,27 +233,24 @@ pub fn apply_bundle(db: &Database, bundle: &SeedBundle) -> MemoryResult<SeedRepo
             "shared_session" => RelationType::SharedSession,
             "temporal" => RelationType::Temporal,
             "embedding_similarity" => RelationType::EmbeddingSimilarity,
+            "related_to" => RelationType::SharedEntity,
             _ => RelationType::Causal,
         };
         match relations.get_edge(&r.workspace, &r.src, &r.dst, rt)? {
             Some(_) => {}
             None => {
-                let mut edge = relations.record_causal_evidence(
-                    if rt == RelationType::Causal {
-                        &r.workspace
-                    } else {
-                        &r.workspace
-                    },
-                    &r.src,
-                    &r.dst,
-                    &crate::confidence::EvidenceType::HumanReviewConfirm,
-                    Some(ObservationSourceType::FileEvidence),
-                    1,
-                    &crate::models::causal::CausalStats::default(),
-                )?;
-                if rt != RelationType::Causal {
-                    // Best-effort: causal path used above; non-causal store via record_evidence
-                    edge = relations.record_evidence(
+                if rt == RelationType::Causal {
+                    relations.record_causal_evidence(
+                        &r.workspace,
+                        &r.src,
+                        &r.dst,
+                        &crate::confidence::EvidenceType::HumanReviewConfirm,
+                        Some(ObservationSourceType::FileEvidence),
+                        1,
+                        &crate::models::causal::CausalStats::default(),
+                    )?;
+                } else {
+                    relations.record_evidence(
                         &r.workspace,
                         &r.src,
                         &r.dst,
@@ -261,7 +258,6 @@ pub fn apply_bundle(db: &Database, bundle: &SeedBundle) -> MemoryResult<SeedRepo
                         &crate::confidence::EvidenceType::RepeatedOccurrence,
                     )?;
                 }
-                let _ = edge;
                 report.relations += 1;
             }
         }

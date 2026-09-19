@@ -1,0 +1,192 @@
+{
+  "observations": [
+    {
+      "id": "mmos-dream-entity-neighborhood",
+      "workspace": "mindmemos",
+      "subject": "dreaming_consolidation",
+      "predicate": "related_to",
+      "object": "entity_neighborhood_scope",
+      "evidence": "Dreaming 从 lookback 窗口选未巩固 add 记录，以每条为种子检索同实体 active 记忆，形成实体中心簇；不做全局比对，也不做孤立两两处理。",
+      "source": "file_evidence",
+      "causal_role": "observed_association"
+    },
+    {
+      "id": "mmos-dream-detect-then-act",
+      "workspace": "mindmemos",
+      "subject": "dreaming_two_stage",
+      "predicate": "causes",
+      "object": "conservative_memory_mutation",
+      "evidence": "Dreaming 两阶段 detect-then-act：LLM1 识别冲突/重复/互补碎片/低价值/歧义关系；校验主体一致与证据后，LLM2 产出保守 mutation（合并/更新/归档/link）。实体身份或时序不确定时倾向非破坏性更新。",
+      "source": "file_evidence",
+      "causal_role": "observed_association"
+    },
+    {
+      "id": "mmos-dream-benchmark-gain",
+      "workspace": "mindmemos",
+      "subject": "mindvanilla_plus_dreaming",
+      "predicate": "causes",
+      "object": "factconsolidation_score_gain",
+      "evidence": "MemoryAgentBench FactConsolidation：GPT-4o-mini 下 MindVanilla 0.635 → +Dreaming 0.738（AMCR 21.4%）；GPT-5-mini 0.900 → 0.920（AMCR 23.5%）。",
+      "source": "file_evidence",
+      "causal_role": "intervention"
+    },
+    {
+      "id": "mmos-feedback-persistence-3way",
+      "workspace": "mindmemos",
+      "subject": "implicit_feedback",
+      "predicate": "related_to",
+      "object": "persistence_scope",
+      "evidence": "隐式反馈：异步扫 session，从用户对 agent 输出的纠正中检测信号，按持久性分类 task-temporary / scenario-specific / long-term；仅 durable 范围才规划 add/update/delete。",
+      "source": "file_evidence",
+      "causal_role": "observed_association"
+    },
+    {
+      "id": "mmos-temp-correction-not-durable",
+      "workspace": "mindmemos",
+      "subject": "task_temporary_correction",
+      "predicate": "not_related_to",
+      "object": "durable_memory_write",
+      "evidence": "Task-temporary 纠正只适用于当前任务，不作为新 durable 记忆存储；但可用于纠正错误保留的一次性信息。",
+      "source": "file_evidence",
+      "causal_role": null
+    },
+    {
+      "id": "mmos-action-plan-5ops",
+      "workspace": "mindmemos",
+      "subject": "memory_candidate",
+      "predicate": "related_to",
+      "object": "add_reinforce_update_merge_skip",
+      "evidence": "MindVanilla 去重与 Action Planning：content hash + memory type 去重后，确定性安全门将候选映射为 Add / Reinforce / Update / Merge / Skip。",
+      "source": "file_evidence",
+      "causal_role": null
+    },
+    {
+      "id": "mmos-recall-aware-envelope",
+      "workspace": "mindmemos",
+      "subject": "extraction_prompt",
+      "predicate": "related_to",
+      "object": "evidence_vs_context_envelope",
+      "evidence": "Recall-aware 提取：结构化 envelope 分离 extractable evidence 与 contextual memories；历史/召回仅用于消歧、查重、冲突判断，不得直接支撑新记忆内容。",
+      "source": "file_evidence",
+      "causal_role": null
+    },
+    {
+      "id": "mmos-compact-rrf-bidirectional",
+      "workspace": "mindmemos",
+      "subject": "compact_search",
+      "predicate": "related_to",
+      "object": "hybrid_rrf_bidirectional",
+      "evidence": "Compact Search：BM25 + dense embedding 经 RRF 融合；图上前向（实体→属性）与反向（属性记录→实体）遍历；agentic 外层迭代规划检索直至证据充分。",
+      "source": "file_evidence",
+      "causal_role": null
+    },
+    {
+      "id": "mmos-entity-property-time",
+      "workspace": "mindmemos",
+      "subject": "memory_record_3d",
+      "predicate": "related_to",
+      "object": "entity_property_time",
+      "evidence": "三维结构：entity（人/组织/位置/事件/制品）+ property（偏好/活动/经验）+ time；同一 entity-property 的 successive 记录形成 timeline，可表示更新与冲突版本而不覆盖历史。",
+      "source": "file_evidence",
+      "causal_role": null
+    },
+    {
+      "id": "mmos-skill-evolve-trajectory",
+      "workspace": "mindmemos",
+      "subject": "mindskillevolve",
+      "predicate": "causes",
+      "object": "skill_version_update",
+      "evidence": "MindSkillEvolve：轨迹绑定 skill 版本；未消费轨迹聚合成 evidence-driven 分析；达阈值后 LLM 生成 skill 编辑计划并确定性应用，产出新版本。SpreadsheetBench 成功率：no-skill 51.3% → evolve-unsup 55.3% / evolve-sup 57.2%。",
+      "source": "file_evidence",
+      "causal_role": "intervention"
+    },
+    {
+      "id": "mmos-openclaw-write-hook",
+      "workspace": "mindmemos",
+      "subject": "openclaw_plugin_agent_end",
+      "predicate": "depends_on",
+      "object": "allow_conversation_access",
+      "evidence": "OpenClaw 插件 agent_end 写入需要 allowConversationAccess；否则看起来正常但回合结束后记忆不落库。CLI PATH 需绝对路径或 uv run 包装。",
+      "source": "file_evidence",
+      "causal_role": "observed_association"
+    },
+    {
+      "id": "mmos-schmea-evolve-fitness",
+      "workspace": "mindmemos",
+      "subject": "mindmemevolve",
+      "predicate": "related_to",
+      "object": "llm_guided_schema_evolution",
+      "evidence": "MindMemEvolve 用 QA Judge 作 fitness，LLM 引导 induced/random mutation + crossover + 剪枝，在离散 schema 空间做进化搜索。",
+      "source": "file_evidence",
+      "causal_role": null
+    }
+  ],
+  "concepts": [
+    {
+      "id": "c-mmos-dreaming",
+      "workspace": "mindmemos",
+      "name": "MindMemOS Dreaming 实体邻域巩固",
+      "definition": "detect-then-act 两阶段；实体中心 scope；consolidated 标记；benchmark FactConsolidation +10pt",
+      "entities": ["dreaming", "entity_neighborhood", "detect_act", "factconsolidation", "consolidated"],
+      "lifecycle_scope": "global",
+      "scope_key": null,
+      "confidence": 0.93
+    },
+    {
+      "id": "c-mmos-feedback",
+      "workspace": "mindmemos",
+      "name": "隐式反馈与持久性三档",
+      "definition": "task-temporary / scenario-specific / long-term；临时纠正不入库",
+      "entities": ["implicit_feedback", "persistence_scope", "task_temporary", "scenario_specific", "long_term"],
+      "lifecycle_scope": "global",
+      "scope_key": null,
+      "confidence": 0.91
+    },
+    {
+      "id": "c-mmos-mindvanilla",
+      "workspace": "mindmemos",
+      "name": "MindVanilla Add 五操作",
+      "definition": "Recall-aware envelope + Add/Reinforce/Update/Merge/Skip 安全门",
+      "entities": ["mindvanilla", "action_plan", "recall_aware", "evidence_envelope"],
+      "lifecycle_scope": "global",
+      "scope_key": null,
+      "confidence": 0.9
+    },
+    {
+      "id": "c-mmos-compact-search",
+      "workspace": "mindmemos",
+      "name": "Compact Search 混合图检索",
+      "definition": "RRF(BM25+dense) + 双向遍历 + agentic 控制器",
+      "entities": ["compact_search", "rrf", "bidirectional", "agentic_search"],
+      "lifecycle_scope": "global",
+      "scope_key": null,
+      "confidence": 0.9
+    },
+    {
+      "id": "c-mmos-skill-evolve",
+      "workspace": "mindmemos",
+      "name": "MindSkillEvolve 轨迹驱动 Skill 演化",
+      "definition": "轨迹→分析→改进计划→版本化 skill 更新",
+      "entities": ["mindskillevolve", "trajectory", "skill_registry", "spreadsheetbench"],
+      "lifecycle_scope": "global",
+      "scope_key": null,
+      "confidence": 0.88
+    },
+    {
+      "id": "c-mmos-agent-plugin",
+      "workspace": "mindmemos",
+      "name": "Agent 插件读写钩子",
+      "definition": "pre-turn recall 注入 + post-turn 写回；权限/PATH 坑",
+      "entities": ["openclaw_plugin", "dsh_plugin", "allowConversationAccess", "cli_path"],
+      "lifecycle_scope": "global",
+      "scope_key": null,
+      "confidence": 0.86
+    }
+  ],
+  "relations": [
+    { "src": "c-mmos-dreaming", "dst": "c-mmos-mindvanilla", "relation_type": "causal", "workspace": "mindmemos" },
+    { "src": "c-mmos-feedback", "dst": "c-mmos-mindvanilla", "relation_type": "causal", "workspace": "mindmemos" },
+    { "src": "c-mmos-compact-search", "dst": "c-mmos-skill-evolve", "relation_type": "related_to", "workspace": "mindmemos" },
+    { "src": "c-mmos-skill-evolve", "dst": "c-mmos-agent-plugin", "relation_type": "causal", "workspace": "mindmemos" }
+  ]
+}

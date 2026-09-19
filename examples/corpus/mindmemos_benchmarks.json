@@ -1,0 +1,84 @@
+{
+  "observations": [
+    {
+      "id": "mmos-locomo-mindschema-best",
+      "workspace": "mindmemos-bench",
+      "subject": "mindmemos_mindschema",
+      "predicate": "related_to",
+      "object": "locomo_overall_94_03",
+      "evidence": "LoCoMo overall: MindVanilla 87.60, MindSchema 94.03（Single 96.79 / Multi 93.97 / Temporal 90.34 / Open 82.29），优于 Mem0/MemU/MemOS/Zep/EverOS。",
+      "source": "file_evidence",
+      "causal_role": null
+    },
+    {
+      "id": "mmos-personamem-mindschema",
+      "workspace": "mindmemos-bench",
+      "subject": "mindmemos_mindschema",
+      "predicate": "related_to",
+      "object": "personamem_overall_70_63",
+      "evidence": "PersonaMem overall MindSchema 70.63；Suggest 47.31 / Recall 81.40 高于多数 baseline。",
+      "source": "file_evidence",
+      "causal_role": null
+    },
+    {
+      "id": "mmos-3d-structure-fact",
+      "workspace": "mindmemos-bench",
+      "subject": "memory_3d_graph",
+      "predicate": "has",
+      "object": "entity_property_temporal_links",
+      "evidence": "3D 图捕获实体间语义关系与同 entity-property 连续记录的时序关系，支持可追溯导航。",
+      "source": "file_evidence",
+      "causal_role": null
+    },
+    {
+      "id": "mmos-rigid-memory-problem",
+      "workspace": "mindmemos-bench",
+      "subject": "fixed_memory_schema",
+      "predicate": "causes",
+      "object": "domain_adaptation_cost",
+      "evidence": "现有记忆系统抽取策略/建模结构常在部署后固定，换域需大量适配——rigid schema 是三挑战之一。",
+      "source": "file_evidence",
+      "causal_role": "observed_association"
+    },
+    {
+      "id": "mmos-skills-memory-split",
+      "workspace": "mindmemos-bench",
+      "subject": "memory_and_skill_separated",
+      "predicate": "causes",
+      "object": "experience_not_capability",
+      "evidence": "记忆内容与程序性 skill 分离管理，难以把执行经验变成可复用且持续精炼的 agent 能力。",
+      "source": "file_evidence",
+      "causal_role": "observed_association"
+    }
+  ],
+  "concepts": [
+    {
+      "id": "c-mmos-benchmarks",
+      "workspace": "mindmemos-bench",
+      "name": "MindMemOS 基准表现",
+      "definition": "LoCoMo 94.03 / PersonaMem 70.63 / Dreaming +10pt / Skill evolve +6~9pt",
+      "entities": ["locomo", "personamem", "memoryagentbench", "spreadsheetbench"],
+      "lifecycle_scope": "global",
+      "scope_key": null,
+      "confidence": 0.94
+    },
+    {
+      "id": "c-mmos-rigidity-challenges",
+      "workspace": "mindmemos-bench",
+      "name": "记忆系统三大僵化挑战",
+      "definition": "schema 不可场景自适应、冗余冲突无人维护、经验与 skill 割裂",
+      "entities": ["rigid_schema", "redundancy_conflict", "memory_skill_split"],
+      "lifecycle_scope": "global",
+      "scope_key": null,
+      "confidence": 0.9
+    }
+  ],
+  "relations": [
+    {
+      "src": "c-mmos-rigidity-challenges",
+      "dst": "c-mmos-benchmarks",
+      "relation_type": "causal",
+      "workspace": "mindmemos-bench"
+    }
+  ]
+}

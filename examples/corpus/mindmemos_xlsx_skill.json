@@ -1,0 +1,150 @@
+{
+  "observations": [
+    {
+      "id": "xlsx-openpyxl-basic",
+      "workspace": "skill-xlsx",
+      "subject": "xlsx_processing",
+      "predicate": "depends_on",
+      "object": "openpyxl",
+      "evidence": "Use openpyxl to read and write .xlsx files. wb = load_workbook('input.xlsx'); ws = wb['Sheet1']; wb.save().",
+      "source": "file_evidence",
+      "causal_role": null
+    },
+    {
+      "id": "xlsx-cell-1-based",
+      "workspace": "skill-xlsx",
+      "subject": "openpyxl_cell_index",
+      "predicate": "related_to",
+      "object": "one_based_coordinates",
+      "evidence": "Cell indices are 1-based: ws.cell(row=1, column=1) is A1.",
+      "source": "file_evidence",
+      "causal_role": null
+    },
+    {
+      "id": "xlsx-data-only-destroys-formulas",
+      "workspace": "skill-xlsx",
+      "subject": "data_only_true",
+      "predicate": "causes",
+      "object": "formula_loss_on_save",
+      "evidence": "data_only=True destroys formulas on save: use a separate workbook object for reading calculated values. Never assume wb.save() computes formulas.",
+      "source": "file_evidence",
+      "causal_role": "intervention"
+    },
+    {
+      "id": "xlsx-max-row-overcount",
+      "workspace": "skill-xlsx",
+      "subject": "ws_max_row",
+      "predicate": "related_to",
+      "object": "empty_formatted_rows",
+      "evidence": "ws.max_row overcounts: may include formatted-but-empty rows. Scan upward to find the last non-empty relevant cell.",
+      "source": "file_evidence",
+      "causal_role": null
+    },
+    {
+      "id": "xlsx-evolve-not-replace-formula",
+      "workspace": "skill-xlsx",
+      "subject": "user_reusable_formula_request",
+      "predicate": "not_related_to",
+      "object": "silent_hardcode_values",
+      "evidence": "If the user explicitly asks for a reusable formula, do not silently replace it with hardcoded values. Decide whether grader checks formula text or cached cell values.",
+      "source": "file_evidence",
+      "causal_role": "observed_association"
+    },
+    {
+      "id": "xlsx-evolve-read-only-inspect",
+      "workspace": "skill-xlsx",
+      "subject": "row_column_transformation",
+      "predicate": "depends_on",
+      "object": "read_only_inspection_pass",
+      "evidence": "For filtering/lookup/mapping/dedup/sort tasks: first read-only inspection pass to confirm true data bounds, header row, merged cells, and ≥2 concrete source-to-target examples. Then compute in memory and write once.",
+      "source": "file_evidence",
+      "causal_role": "observed_association"
+    },
+    {
+      "id": "xlsx-evolve-blacklist-live-iter",
+      "workspace": "skill-xlsx",
+      "subject": "live_worksheet_iteration",
+      "predicate": "causes",
+      "object": "incorrect_row_transform",
+      "evidence": "Blacklisted: iterating a live worksheet while simultaneously reading and writing for filtering, lookup, dedup, sort, row moves, deletion/insertion, or expansion.",
+      "source": "file_evidence",
+      "causal_role": "observed_association"
+    },
+    {
+      "id": "xlsx-evolve-merged-cells",
+      "workspace": "skill-xlsx",
+      "subject": "write_target_range",
+      "predicate": "depends_on",
+      "object": "inspect_merged_cells",
+      "evidence": "Before writing, inspect ws.merged_cells.ranges. Never assign to a merged placeholder cell (MergedCell).",
+      "source": "file_evidence",
+      "causal_role": null
+    },
+    {
+      "id": "xlsx-evolve-formula-string-replace",
+      "workspace": "skill-xlsx",
+      "subject": "formula_edit",
+      "predicate": "not_related_to",
+      "object": "naive_string_replacement",
+      "evidence": "Do not generate or extend formulas by naive string replacement on existing formula text; build each target formula explicitly from the row number.",
+      "source": "file_evidence",
+      "causal_role": "observed_association"
+    },
+    {
+      "id": "xlsx-evolve-benchmark",
+      "workspace": "skill-xlsx",
+      "subject": "mindskillevolve_xlsx",
+      "predicate": "causes",
+      "object": "spreadsheetbench_success_gain",
+      "evidence": "SpreadsheetBench-Verified: no-skill 51.3% vs init-skill 48.0% vs MindEvolve-Unsup 55.3% vs MindEvolve-Sup 57.2%. Evolved skill adds high-risk guards, blacklists, grader-aware formula policy.",
+      "source": "file_evidence",
+      "causal_role": "intervention"
+    }
+  ],
+  "concepts": [
+    {
+      "id": "c-xlsx-init-skill",
+      "workspace": "skill-xlsx",
+      "name": "xlsx Init Skill（基础）",
+      "definition": "openpyxl + pandas 读写；1-based cell；data_only/max_row 坑",
+      "entities": ["openpyxl", "pandas", "data_only", "max_row", "one_based"],
+      "lifecycle_scope": "project",
+      "scope_key": "spreadsheet",
+      "confidence": 0.85
+    },
+    {
+      "id": "c-xlsx-evolved-guards",
+      "workspace": "skill-xlsx",
+      "name": "xlsx 演化后高风险守卫",
+      "definition": "只读预检、内存一次写回、公式与评分器语义、merged cell、黑名单行为",
+      "entities": ["read_only_pass", "in_memory_write", "merged_cells", "formula_policy", "blacklist_live_iter"],
+      "lifecycle_scope": "global",
+      "scope_key": null,
+      "confidence": 0.92
+    },
+    {
+      "id": "c-xlsx-trajectory-evolve",
+      "workspace": "skill-xlsx",
+      "name": "轨迹驱动 Skill 升级",
+      "definition": "失败/成功轨迹分析 → 高风险条款注入 → 版本化 skill",
+      "entities": ["trajectory", "skill_evolve", "high_risk_action", "spreadsheetbench"],
+      "lifecycle_scope": "global",
+      "scope_key": null,
+      "confidence": 0.9
+    }
+  ],
+  "relations": [
+    {
+      "src": "c-xlsx-trajectory-evolve",
+      "dst": "c-xlsx-evolved-guards",
+      "relation_type": "causal",
+      "workspace": "skill-xlsx"
+    },
+    {
+      "src": "c-xlsx-init-skill",
+      "dst": "c-xlsx-evolved-guards",
+      "relation_type": "causal",
+      "workspace": "skill-xlsx"
+    }
+  ]
+}

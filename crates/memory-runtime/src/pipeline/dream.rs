@@ -35,12 +35,9 @@ pub enum DreamAction {
         keep_id: String,
         duplicate_ids: Vec<String>,
     },
-    /// Raise β on conflicting counterparts around `subject`/`object`.
-    SoftenConflict {
-        observation_ids: Vec<String>,
-        alpha: f64,
-        beta: f64,
-    },
+    /// Soften conflicting counterparts (apply stage uses ConflictingEvidence
+    /// per row; no planned α/β payload).
+    SoftenConflict { observation_ids: Vec<String> },
     /// Archive a low-value observation.
     Archive { observation_id: String },
     /// No mutation; only mark consolidated.
@@ -211,21 +208,10 @@ pub fn plan_actions(
                 if live.len() < 2 {
                     continue;
                 }
-                // Preserve current alphas, add equal conflicting mass to β.
-                let mut alpha: f64 = 1.0;
-                let mut beta: f64 = 1.0;
-                for id in &live {
-                    if let Some(o) = by_id.get(id.as_str()) {
-                        if o.evidence_alpha > alpha {
-                            alpha = o.evidence_alpha;
-                        }
-                        beta = o.evidence_beta + 1.5;
-                    }
-                }
+                // Apply stage softens each live row via ConflictingEvidence;
+                // no planned α/β payload is needed here.
                 actions.push(DreamAction::SoftenConflict {
                     observation_ids: live,
-                    alpha,
-                    beta,
                 });
             }
             DreamIssue::LowValue => {
@@ -341,11 +327,7 @@ pub fn dream_workspace<O: ObservationStore>(
                     observations.update_confidence(keep_id, bc.alpha, bc.beta)?;
                     report.merges += 1;
                 }
-                DreamAction::SoftenConflict {
-                    observation_ids,
-                    alpha: _,
-                    beta: _,
-                } => {
+                DreamAction::SoftenConflict { observation_ids } => {
                     for id in observation_ids {
                         if let Some(o) = by_id.get(id) {
                             let mut bc =

@@ -263,10 +263,14 @@ pub async fn extract_and_dedup<S: ObservationStore>(
                 }
             }
             crate::pipeline::action_plan::MemoryAction::Update => {
-                // Object revised for same subject+predicate: supersede the old row
+                // Object revised for same subject+predicate: supersede the old LIVE row
                 // and append a new timeline version (P14 — no overwrite).
+                // Must match the planner's live filter — dead rows must not be
+                // superseded again (no-op) while a surviving older row stays active.
                 if let Some(old) = related.iter().find(|o| {
-                    o.subject_text == obs.subject_text && o.predicate == obs.predicate
+                    o.subject_text == obs.subject_text
+                        && o.predicate == obs.predicate
+                        && o.status.is_live()
                 }) {
                     store.supersede(&old.observation_id, &format!("update:{}", obs.observation_id))?;
                     store.sync_cross_project_count(
@@ -280,11 +284,12 @@ pub async fn extract_and_dedup<S: ObservationStore>(
                 }
             }
             crate::pipeline::action_plan::MemoryAction::Merge => {
-                // Related predicates on same subject+object: reinforce the live one.
-                if let Some(existing) = related
-                    .iter()
-                    .find(|o| o.subject_text == obs.subject_text && o.object_text == obs.object_text)
-                {
+                // Related predicates on same subject+object: reinforce the LIVE one.
+                if let Some(existing) = related.iter().find(|o| {
+                    o.subject_text == obs.subject_text
+                        && o.object_text == obs.object_text
+                        && o.status.is_live()
+                }) {
                     let mut bc = BetaConfidence::with_values(
                         existing.evidence_alpha,
                         existing.evidence_beta,

@@ -243,3 +243,31 @@ fn promotion_report_defaults_when_concept_missing() {
     .unwrap();
     assert_eq!(report.to, None);
 }
+
+/// H4 regression: Domain evidence without a domain_key must not write Domain+NULL.
+#[test]
+fn domain_promotion_without_key_leaves_scope_unchanged() {
+    let db = Database::open_in_memory().unwrap();
+    let store = SqliteConceptStore::new(db.conn.clone());
+
+    let mut primary = concept("ws-a", "c-nokey", &["posmask", "machine_field"], 0.9);
+    primary.connection_count = 3;
+    primary.recall_count = 3;
+    store.insert_concept(&primary).unwrap();
+
+    let report = maybe_promote_concept(
+        &store,
+        "c-nokey",
+        2,
+        0,
+        &PromotionThresholds::default(),
+        None,
+        "2026-07-02T00:00:00Z",
+    )
+    .unwrap();
+
+    assert_eq!(report.to, None);
+    let still = store.get_concept("c-nokey").unwrap().unwrap();
+    assert_eq!(still.lifecycle_scope, LifecycleScope::Project);
+    assert_eq!(still.scope_key, None);
+}

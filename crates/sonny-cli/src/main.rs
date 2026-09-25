@@ -461,10 +461,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     &timeline, obs, &now,
                 );
             }
+            // kept.len() is observations to insert; raws is messages — do not
+            // subtract them (different units). Reinforce/update counts live
+            // inside extract_and_dedup and are not returned.
             println!(
-                "Extract: raw={}, kept_for_insert={inserted}, reinforced/updated in-place={}",
+                "Extract: raw_messages={}, kept_for_insert={inserted}",
                 raws.len(),
-                raws.len() - kept.len()
             );
         }
         Commands::Reextract { session_id } => {

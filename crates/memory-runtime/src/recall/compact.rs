@@ -64,10 +64,11 @@ pub fn lexical_score(query: &str, concept: &Concept) -> f64 {
         if d.contains(&q) {
             score += 2.0;
         }
-        // Token overlap
+        // Token overlap. Filter by char count so single CJK characters
+        // (3 UTF-8 bytes) are not treated as multi-char tokens.
         let tokens: Vec<&str> = q.split_whitespace().collect();
         for t in tokens {
-            if t.len() >= 2 && d.contains(t) {
+            if t.chars().count() >= 2 && d.contains(t) {
                 score += 0.5;
             }
         }
@@ -78,7 +79,7 @@ pub fn lexical_score(query: &str, concept: &Concept) -> f64 {
             score += 2.5;
         }
         for t in q.split_whitespace() {
-            if t.len() >= 2 && lower.contains(t) {
+            if t.chars().count() >= 2 && lower.contains(t) {
                 score += 0.8;
             }
         }
@@ -521,5 +522,46 @@ mod tests {
             updated_at: "t".into(),
         };
         assert!(lexical_score("POSMASK", &concept) > 0.0);
+    }
+
+    fn concept_with_def(def: &str, entities_json: &str) -> Concept {
+        Concept {
+            concept_id: "c".into(),
+            workspace_id: "ws".into(),
+            name: "c".into(),
+            concept_type: None,
+            definition: Some(def.into()),
+            related_entities_json: Some(entities_json.into()),
+            known_facts_json: None,
+            rejected_hypotheses_json: None,
+            open_questions_json: None,
+            evidence_json: None,
+            confidence: 0.8,
+            evidence_alpha: 4.0,
+            evidence_beta: 1.0,
+            status: ConceptStatus::Active,
+            parent_concept_id: None,
+            hierarchy_depth: 0,
+            last_recalled_at: None,
+            recall_count: 0,
+            successful_recall_count: 0,
+            failed_recall_count: 0,
+            connection_count: 0,
+            lifecycle_scope: crate::models::scope::LifecycleScope::Project,
+            scope_key: None,
+            created_at: "t".into(),
+            updated_at: "t".into(),
+        }
+    }
+
+    /// H1 regression: token overlap must filter by char count, not UTF-8 bytes.
+    #[test]
+    fn lexical_token_overlap_skips_single_cjk_chars() {
+        let c = concept_with_def("查询服务", "[]");
+        // "查"/"服" are 1 char (3 bytes) — no token-overlap bonus; whole query
+        // "查 服" is not a substring either, so the score stays 0.
+        assert_eq!(lexical_score("查 服", &c), 0.0);
+        // Multi-char token still earns definition overlap (contains 2.0 + token 0.5).
+        assert!(lexical_score("查询", &c) >= 2.5);
     }
 }

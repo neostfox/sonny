@@ -269,6 +269,192 @@ async fn test_extract_and_dedup_filters_duplicates() {
     assert_eq!(bumped.evidence_beta, 1.0);
 }
 
+fn make_obs(
+    workspace_id: &str,
+    memory_id: &str,
+    subject: &str,
+    predicate: &str,
+    object: Option<&str>,
+    status: ObservationStatus,
+    created_at: &str,
+) -> Observation {
+    Observation {
+        observation_id: uuid::Uuid::new_v4().to_string(),
+        workspace_id: workspace_id.to_string(),
+        memory_id: memory_id.to_string(),
+        subject_text: subject.to_string(),
+        subject_type: None,
+        predicate: predicate.to_string(),
+        object_text: object.map(str::to_string),
+        object_type: None,
+        evidence_text: Some(format!("{subject} {predicate} {}", object.unwrap_or(""))),
+        extraction_confidence: 0.9,
+        evidence_alpha: 3.0,
+        evidence_beta: 1.0,
+        status,
+        surprise_score: 0.5,
+        source_type: ObservationSourceType::UserMessage,
+        memory_type_candidate: None,
+        observation_detail_json: None,
+        extraction_batch_id: None,
+        superseded_by: None,
+        cross_project_count: 1,
+        causal_role: None,
+        consolidated: false,
+        created_at: created_at.to_string(),
+    }
+}
+
+/// Seed a raw_memory row with a fixed memory_id (FK target for observations).
+fn seed_raw_id(conn: &rusqlite::Connection, memory_id: &str, content: &str) {
+    let raw = RawMemory {
+        memory_id: memory_id.to_string(),
+        workspace_id: "ws".to_string(),
+        session_id: format!("s-{memory_id}"),
+        role: "user".to_string(),
+        content: content.to_string(),
+        source_type: SourceType::SessionFile,
+        source_ref: "test".to_string(),
+        extraction_version: None,
+        created_at: "2026-07-01T00:00:00Z".to_string(),
+    };
+    seed_raw_memories(conn, std::slice::from_ref(&raw));
+}
+
+/// H3 regression: Update/Merge must target LIVE rows only.
+/// When a newer superseded row sits above an older live row, the live one
+/// is what must be superseded / reinforced — not the dead row.
+#[tokio::test]
+async fn extract_update_supersedes_live_row_not_dead_row() {
+    use memory_runtime::pipeline::extract::extract_and_dedup;
+    use memory_test_fixtures::mock_llm::MockLlmProvider;
+
+    let db = Database::open_in_memory().unwrap();
+    let raw = make_test_raw_memory("ws", "s1", "user", "service has_field revised_value");
+    {
+        let conn = db.conn.lock();
+        seed_raw_memories(&conn, std::slice::from_ref(&raw));
+        seed_raw_id(&conn, "mem-live", "old");
+        seed_raw_id(&conn, "mem-dead", "dead");
+    }
+    let obs_store = SqliteObservationStore::new(db.conn.clone());
+
+    let live_old = make_obs(
+        "ws",
+        "mem-live",
+        "service",
+        "has",
+        Some("old_value"),
+        ObservationStatus::Confirmed,
+        "2026-07-01T00:00:00Z",
+    );
+    let dead_new = make_obs(
+        "ws",
+        "mem-dead",
+        "service",
+        "has",
+        Some("dead_value"),
+        ObservationStatus::Superseded,
+        "2026-07-02T00:00:00Z",
+    );
+    let live_id = live_old.observation_id.clone();
+    let dead_id = dead_new.observation_id.clone();
+    obs_store.insert_batch(&[live_old, dead_new]).unwrap();
+
+    let mock = MockLlmProvider::new().with_response(
+        "service",
+        r#"{"observations":[{"subject_text":"service","predicate":"has_field","object_text":"revised_value","evidence_text":"service has_field revised_value","source_type":"user_message"}]}"#,
+    );
+    let kept = extract_and_dedup(std::slice::from_ref(&raw), &mock, &obs_store)
+        .await
+        .unwrap();
+    assert_eq!(kept.len(), 1);
+    obs_store.insert_batch(&kept).unwrap();
+
+    let live_after = obs_store.get(&live_id).unwrap().unwrap();
+    let dead_after = obs_store.get(&dead_id).unwrap().unwrap();
+    assert_eq!(
+        live_after.status,
+        ObservationStatus::Superseded,
+        "Update must supersede the live older row, not the dead newer one"
+    );
+    assert_eq!(
+        dead_after.status,
+        ObservationStatus::Superseded,
+        "dead row must stay dead (no double-supersede side effects)"
+    );
+    // Exactly one live row remains for this subject+predicate.
+    let related = obs_store.find_by_entity("service", "ws").unwrap();
+    let live_count = related
+        .iter()
+        .filter(|o| o.predicate == "has" && o.status.is_live())
+        .count();
+    assert_eq!(live_count, 1, "must not leave two live has rows");
+}
+
+#[tokio::test]
+async fn extract_merge_reinforces_live_row_not_dead_row() {
+    use memory_runtime::pipeline::extract::extract_and_dedup;
+    use memory_test_fixtures::mock_llm::MockLlmProvider;
+
+    let db = Database::open_in_memory().unwrap();
+    let raw = make_test_raw_memory("ws", "s1", "user", "posmask depends_on machine_field");
+    {
+        let conn = db.conn.lock();
+        seed_raw_memories(&conn, std::slice::from_ref(&raw));
+        seed_raw_id(&conn, "mem-live", "old");
+        seed_raw_id(&conn, "mem-dead", "dead");
+    }
+    let obs_store = SqliteObservationStore::new(db.conn.clone());
+
+    let live_rel = make_obs(
+        "ws",
+        "mem-live",
+        "posmask",
+        "related_to",
+        Some("machine_field"),
+        ObservationStatus::Confirmed,
+        "2026-07-01T00:00:00Z",
+    );
+    let dead_cause = make_obs(
+        "ws",
+        "mem-dead",
+        "posmask",
+        "causes",
+        Some("machine_field"),
+        ObservationStatus::Superseded,
+        "2026-07-02T00:00:00Z",
+    );
+    let live_id = live_rel.observation_id.clone();
+    let dead_id = dead_cause.observation_id.clone();
+    let live_alpha_before = live_rel.evidence_alpha;
+    let dead_alpha_before = dead_cause.evidence_alpha;
+    obs_store.insert_batch(&[live_rel, dead_cause]).unwrap();
+
+    let mock = MockLlmProvider::new().with_response(
+        "posmask",
+        r#"{"observations":[{"subject_text":"posmask","predicate":"depends_on","object_text":"machine_field","evidence_text":"posmask depends_on machine_field","source_type":"user_message"}]}"#,
+    );
+    let kept = extract_and_dedup(std::slice::from_ref(&raw), &mock, &obs_store)
+        .await
+        .unwrap();
+    assert!(
+        kept.is_empty(),
+        "Merge of same subject+object should reinforce, not insert"
+    );
+
+    let live_after = obs_store.get(&live_id).unwrap().unwrap();
+    let dead_after = obs_store.get(&dead_id).unwrap().unwrap();
+    assert!(
+        live_after.evidence_alpha > live_alpha_before,
+        "Merge must bump the live row's evidence"
+    );
+    assert_eq!(
+        dead_after.evidence_alpha, dead_alpha_before,
+        "Merge must not bump a dead row's evidence"
+    );
+}
+
 #[test]
 fn test_batch_insert_and_query() {
     let db = Database::open_in_memory().unwrap();

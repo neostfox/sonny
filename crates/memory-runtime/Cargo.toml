@@ -13,8 +13,6 @@ rusqlite = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 unicode-normalization = { workspace = true }
-strsim = { workspace = true }
-pulldown-cmark = { workspace = true }
 regex = { workspace = true }
 dirs = { workspace = true }
 parking_lot = { workspace = true }
@@ -22,10 +20,8 @@ async-trait = "0.1"
 reqwest = { version = "0.12", features = ["json"] }
 tokio = { version = "1", features = ["rt"] }
 
-linfa = "0.7"
-linfa-clustering = "0.7"
-
-# Optional: candle-transformers for BGE embedding
+# Optional: candle-transformers for BGE embedding (not in default — enable via
+# `--features embedding` when local inference is actually needed).
 candle-transformers = { version = "0.8", optional = true }
 candle-nn = { version = "0.8", optional = true }
 tokenizers = { version = "0.21", optional = true }
@@ -35,7 +31,7 @@ memory-test-fixtures = { path = "../memory-test-fixtures" }
 tokio = { version = "1", features = ["rt", "macros"] }
 
 [features]
-default = ["embedding"]
+default = []
 embedding = ["candle-transformers", "candle-nn", "tokenizers"]
 sqlite-vec = ["rusqlite/vtab"]
 daemon = ["tokio/rt-multi-thread", "tokio/macros"]

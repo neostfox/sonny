@@ -29,6 +29,15 @@ impl ObservationStatus {
             Self::Superseded => "superseded",
         }
     }
+
+    /// Planner-live set: rows that still carry writeable evidence.
+    /// Matches `action_plan::plan_memory_action` (excludes superseded/rejected/deprecated).
+    pub fn is_live(&self) -> bool {
+        !matches!(
+            self,
+            Self::Superseded | Self::Rejected | Self::Deprecated
+        )
+    }
 }
 
 impl std::str::FromStr for ObservationStatus {

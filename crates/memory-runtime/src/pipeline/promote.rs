@@ -48,6 +48,23 @@ pub fn maybe_promote_concept<C: ConceptStore>(
     let mut merged_alias = None;
 
     if let Some(target) = target {
+        // Domain promotion without a key would land in Domain+NULL: invisible
+        // to other workspaces, and apply_promotion is rank-only so the key
+        // cannot be filled in later via the same path.
+        if target == LifecycleScope::Domain && domain_key.is_none() {
+            tracing::warn!(
+                concept_id,
+                from = concept.lifecycle_scope.as_str(),
+                "evidence qualifies for Domain promotion but domain_key is missing; leaving scope unchanged"
+            );
+            return Ok(PromotionReport {
+                concept_id: concept_id.to_string(),
+                from,
+                to: None,
+                cross_project_count,
+                merged_alias: None,
+            });
+        }
         let key = match target {
             LifecycleScope::Domain => domain_key.map(|s| s.to_string()),
             _ => None,

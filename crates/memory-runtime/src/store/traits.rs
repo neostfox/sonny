@@ -182,18 +182,6 @@ pub trait RelationStore: Send + Sync {
         concept_id: &str,
     ) -> MemoryResult<Vec<ConceptRelation>>;
     fn list_by_workspace(&self, workspace_id: &str) -> MemoryResult<Vec<ConceptRelation>>;
-    /// P7-C: accumulate causal-edge evidence with heterogeneous weights
-    /// (source trust × reuse) and fold do-statistics into the edge.
-    fn record_causal_evidence(
-        &self,
-        workspace_id: &str,
-        src_concept_id: &str,
-        dst_concept_id: &str,
-        evidence: &EvidenceType,
-        source: Option<crate::models::observation::ObservationSourceType>,
-        cross_project_count: i64,
-        stats: &crate::models::causal::CausalStats,
-    ) -> MemoryResult<ConceptRelation>;
 }
 
 /// P4-B: append-only ledger of user feedback events.

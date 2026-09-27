@@ -7,8 +7,7 @@
       "predicate": "related_to",
       "object": "locomo_overall_94_03",
       "evidence": "LoCoMo overall: MindVanilla 87.60, MindSchema 94.03（Single 96.79 / Multi 93.97 / Temporal 90.34 / Open 82.29），优于 Mem0/MemU/MemOS/Zep/EverOS。",
-      "source": "file_evidence",
-      "causal_role": null
+      "source": "file_evidence"
     },
     {
       "id": "mmos-personamem-mindschema",
@@ -17,8 +16,7 @@
       "predicate": "related_to",
       "object": "personamem_overall_70_63",
       "evidence": "PersonaMem overall MindSchema 70.63；Suggest 47.31 / Recall 81.40 高于多数 baseline。",
-      "source": "file_evidence",
-      "causal_role": null
+      "source": "file_evidence"
     },
     {
       "id": "mmos-3d-structure-fact",
@@ -27,8 +25,7 @@
       "predicate": "has",
       "object": "entity_property_temporal_links",
       "evidence": "3D 图捕获实体间语义关系与同 entity-property 连续记录的时序关系，支持可追溯导航。",
-      "source": "file_evidence",
-      "causal_role": null
+      "source": "file_evidence"
     },
     {
       "id": "mmos-rigid-memory-problem",
@@ -37,8 +34,7 @@
       "predicate": "causes",
       "object": "domain_adaptation_cost",
       "evidence": "现有记忆系统抽取策略/建模结构常在部署后固定，换域需大量适配——rigid schema 是三挑战之一。",
-      "source": "file_evidence",
-      "causal_role": "observed_association"
+      "source": "file_evidence"
     },
     {
       "id": "mmos-skills-memory-split",
@@ -47,8 +43,7 @@
       "predicate": "causes",
       "object": "experience_not_capability",
       "evidence": "记忆内容与程序性 skill 分离管理，难以把执行经验变成可复用且持续精炼的 agent 能力。",
-      "source": "file_evidence",
-      "causal_role": "observed_association"
+      "source": "file_evidence"
     }
   ],
   "concepts": [

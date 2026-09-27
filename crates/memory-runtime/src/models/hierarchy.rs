@@ -25,8 +25,6 @@ pub enum RelationType {
     SharedSession,
     EmbeddingSimilarity,
     Temporal,
-    /// Directed cause→effect edge derived from `causes` observations (P5-A).
-    Causal,
 }
 
 impl RelationType {
@@ -36,14 +34,13 @@ impl RelationType {
             Self::SharedSession => "shared_session",
             Self::EmbeddingSimilarity => "embedding_similarity",
             Self::Temporal => "temporal",
-            Self::Causal => "causal",
         }
     }
 
     /// Directed relations preserve (src, dst) order; symmetric relations are
     /// stored with canonical src < dst ordering so a pair has one row.
     pub fn is_directed(&self) -> bool {
-        matches!(self, Self::Temporal | Self::Causal)
+        matches!(self, Self::Temporal)
     }
 }
 
@@ -55,7 +52,8 @@ impl std::str::FromStr for RelationType {
             "shared_session" => Ok(Self::SharedSession),
             "embedding_similarity" => Ok(Self::EmbeddingSimilarity),
             "temporal" => Ok(Self::Temporal),
-            "causal" => Ok(Self::Causal),
+            // Pre-P7-removal rows are migrated to shared_entity; reject unread rows.
+            "causal" => Err(()),
             _ => Err(()),
         }
     }

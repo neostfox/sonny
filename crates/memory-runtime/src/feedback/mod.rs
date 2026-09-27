@@ -265,7 +265,6 @@ fn build_correction(old: &Observation, feedback_text: &str, now: &str) -> Observ
         extraction_batch_id: None,
         superseded_by: None,
         cross_project_count: 1,
-        causal_role: old.causal_role.clone(),
         created_at: now.to_string(),
     }
 }
@@ -448,7 +447,6 @@ mod tests {
             extraction_batch_id: None,
             superseded_by: None,
             cross_project_count: 1,
-            causal_role: None,
             created_at: "2026-06-01T00:00:00Z".to_string(),
         }
     }

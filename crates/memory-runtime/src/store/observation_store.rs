@@ -24,10 +24,10 @@ const OBS_COLUMNS: &str = "\
     observation_id, workspace_id, memory_id, subject_text, subject_type, \
     predicate, object_text, object_type, evidence_text, extraction_confidence, evidence_alpha, evidence_beta, \
     status, surprise_score, source_type, consolidated, created_at, \
-    memory_type_candidate, observation_detail_json, extraction_batch_id, superseded_by, cross_project_count, causal_role";
+    memory_type_candidate, observation_detail_json, extraction_batch_id, superseded_by, cross_project_count";
 
 static OBS_INSERT: LazyLock<String> = LazyLock::new(|| {
-    format!("INSERT INTO observation ({OBS_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)")
+    format!("INSERT INTO observation ({OBS_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)")
 });
 static OBS_GET: LazyLock<String> =
     LazyLock::new(|| format!("SELECT {OBS_COLUMNS} FROM observation WHERE observation_id = ?1"));
@@ -378,7 +378,6 @@ pub(crate) fn insert_observation(conn: &Connection, obs: &Observation) -> rusqli
             &obs.extraction_batch_id,
             &obs.superseded_by,
             &obs.cross_project_count,
-            &obs.causal_role,
         ],
     )?;
     Ok(())
@@ -449,7 +448,6 @@ fn row_to_observation(row: &rusqlite::Row<'_>) -> rusqlite::Result<Observation> 
         extraction_batch_id: row.get(19)?,
         superseded_by: row.get(20)?,
         cross_project_count: row.get(21)?,
-        causal_role: row.get(22)?,
     })
 }
 

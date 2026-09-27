@@ -1,6 +1,6 @@
 //! Concept-to-concept edges (P5-A).
 //!
-//! An edge is the unit of causal/associative knowledge between concepts. Each
+//! An edge is the unit of associative knowledge between concepts. Each
 //! edge carries its own Beta(alpha, beta) posterior — the same evidence
 //! machinery observations use — so edge strength is accumulated evidence, not
 //! a fixed score. Design (TODO.md 断点四): heterogeneous sources feed the SAME
@@ -10,7 +10,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::causal::CausalStats;
 use super::hierarchy::RelationType;
 use crate::confidence::{BetaConfidence, EvidenceType};
 
@@ -66,7 +65,7 @@ pub const VALIDATED_MIN_EVIDENCE: i64 = 3;
 pub struct ConceptRelation {
     pub relation_id: String,
     pub workspace_id: String,
-    /// For directed types (`causal`, `temporal`): the cause / earlier side.
+    /// For directed types (`temporal`): the earlier side.
     /// For symmetric types the pair is stored with src < dst (canonical row).
     pub src_concept_id: String,
     pub dst_concept_id: String,
@@ -77,8 +76,6 @@ pub struct ConceptRelation {
     /// Number of evidence accumulation events (any sign), NOT alpha+beta.
     pub evidence_count: i64,
     pub last_evidence_at: Option<String>,
-    /// P7-B: do-calculus sufficient statistics (meaningful for Causal edges).
-    pub causal_stats: CausalStats,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -103,7 +100,6 @@ impl ConceptRelation {
             evidence_beta: 1.0,
             evidence_count: 0,
             last_evidence_at: None,
-            causal_stats: CausalStats::default(),
             created_at: now.to_string(),
             updated_at: now.to_string(),
         }
@@ -115,7 +111,7 @@ impl ConceptRelation {
     }
 
     /// Accumulate one piece of evidence and apply lifecycle promotion rules.
-    /// Scale factors come from P7-C (source × role × reuse); default 1.0.
+    /// Scale factors let callers apply source-trust / reuse multipliers; default 1.0.
     pub fn add_evidence_scaled(
         &mut self,
         evidence: &EvidenceType,
@@ -197,13 +193,13 @@ mod tests {
 
     #[test]
     fn directed_edges_preserve_endpoint_order() {
-        let e = edge(RelationType::Causal);
+        let e = edge(RelationType::Temporal);
         assert_eq!((e.src_concept_id.as_str(), e.dst_concept_id.as_str()), ("c-b", "c-a"));
     }
 
     #[test]
     fn weight_is_beta_posterior_mean() {
-        let mut e = edge(RelationType::Causal);
+        let mut e = edge(RelationType::Temporal);
         assert!((e.weight() - 0.5).abs() < 1e-9);
         e.add_evidence(&EvidenceType::FileEvidence, "t1"); // alpha += 1.5
         assert!((e.weight() - 2.5 / 3.5).abs() < 1e-9);
@@ -248,14 +244,14 @@ mod tests {
 
     #[test]
     fn human_confirmation_promotes_to_confirmed_immediately() {
-        let mut e = edge(RelationType::Causal);
+        let mut e = edge(RelationType::SharedEntity);
         e.add_evidence(&EvidenceType::UserConfirmation, "t1");
         assert_eq!(e.lifecycle, RelationLifecycle::Confirmed);
     }
 
     #[test]
     fn contradicting_evidence_lowers_weight_without_demotion() {
-        let mut e = edge(RelationType::Causal);
+        let mut e = edge(RelationType::SharedEntity);
         e.add_evidence(&EvidenceType::UserConfirmation, "t1");
         e.add_evidence(&EvidenceType::UserNegation, "t2"); // beta += 3
         assert_eq!(e.lifecycle, RelationLifecycle::Confirmed);

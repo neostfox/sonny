@@ -135,8 +135,8 @@ impl LinkEngine {
             }
         }
 
-        // 3. `causes` observations → directed causal edges (subject → object).
-        // P7-A/C: honor causal_role and feed do-statistics + heterogeneous weights.
+        // 3. `causes` observations → shared_entity association edges.
+        // P7 causal/do-stats removed: co-occurrence is association, not causation.
         for obs in &live {
             if obs.predicate != "causes" {
                 continue;
@@ -144,16 +144,10 @@ impl LinkEngine {
             let Some(object_text) = obs.object_text.as_deref().filter(|s| !s.is_empty()) else {
                 continue;
             };
-            let (evidence, _strength) = match crate::models::causal::causal_edge_evidence(obs) {
-                Some(pair) => pair,
-                None => causal_evidence_fallback(obs),
-            };
-            // Confounds never support the edge.
-            if obs.causal_role.as_deref() == Some("confound") {
-                continue;
-            }
-            let mut stats = crate::models::causal::CausalStats::default();
-            stats.absorb_observation(obs);
+            let evidence = obs
+                .source_type
+                .initial_evidence()
+                .unwrap_or(EvidenceType::RepeatedOccurrence);
 
             let empty = BTreeSet::new();
             let sources = entity_index
@@ -167,14 +161,12 @@ impl LinkEngine {
                     if src == dst {
                         continue;
                     }
-                    relations.record_causal_evidence(
+                    relations.record_evidence(
                         workspace_id,
                         src,
                         dst,
+                        RelationType::SharedEntity,
                         &evidence,
-                        Some(obs.source_type),
-                        obs.cross_project_count,
-                        &stats,
                     )?;
                     report.causal_evidence += 1;
                 }
@@ -183,17 +175,6 @@ impl LinkEngine {
 
         Ok(report)
     }
-}
-
-/// Fallback when causal_role is absent: map source provenance to an edge
-/// evidence type (P5-A behavior preserved).
-fn causal_evidence_fallback(obs: &Observation) -> (EvidenceType, f64) {
-    (
-        obs.source_type
-            .initial_evidence()
-            .unwrap_or(EvidenceType::RepeatedOccurrence),
-        1.0,
-    )
 }
 
 fn is_live(status: &ObservationStatus) -> bool {
@@ -344,13 +325,12 @@ mod tests {
             extraction_batch_id: batch.map(str::to_string),
             superseded_by: None,
             cross_project_count: 1,
-            causal_role: None,
             created_at: "t0".to_string(),
         }
     }
 
     #[test]
-    fn causes_observation_creates_directed_causal_edge() {
+    fn causes_observation_creates_association_edge() {
         let f = fixture();
         f.concepts.insert_concept(&concept("c-mask", &["POSMASK"])).unwrap();
         f.concepts.insert_concept(&concept("c-crash", &["启动崩溃"])).unwrap();
@@ -368,26 +348,18 @@ mod tests {
             .unwrap();
 
         assert_eq!(report.causal_evidence, 1);
-        let edge = f
+        // P7 causal edges removed: `causes` co-occurrence lands as shared_entity.
+        let _edge = f
             .relations
-            .get_edge("ws", "c-mask", "c-crash", RelationType::Causal)
+            .get_edge("ws", "c-mask", "c-crash", RelationType::SharedEntity)
             .unwrap()
-            .expect("causal edge must exist");
-        assert_eq!(edge.src_concept_id, "c-mask");
-        // P7-C: FileEvidence base 1.5 × source trust 1.25 = α += 1.875
-        let expected_alpha = 1.0 + 1.5 * 1.25;
-        assert!(
-            (edge.weight() - expected_alpha / (expected_alpha + 1.0)).abs() < 1e-9,
-            "weight={} expected={}",
-            edge.weight(),
-            expected_alpha / (expected_alpha + 1.0)
-        );
-        // Reverse direction must NOT exist.
+            .expect("association edge must exist");
+        // Symmetric pair — one row either way.
         assert!(f
             .relations
-            .get_edge("ws", "c-crash", "c-mask", RelationType::Causal)
+            .get_edge("ws", "c-crash", "c-mask", RelationType::SharedEntity)
             .unwrap()
-            .is_none());
+            .is_some());
     }
 
     #[test]
@@ -515,7 +487,7 @@ mod tests {
 
         let edge = f
             .relations
-            .get_edge("ws", "c-mask", "c-crash", RelationType::Causal)
+            .get_edge("ws", "c-mask", "c-crash", RelationType::SharedEntity)
             .unwrap()
             .unwrap();
         assert_eq!(edge.evidence_count, 3);

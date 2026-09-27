@@ -7,8 +7,7 @@
       "predicate": "related_to",
       "object": "data_fetch_iteration",
       "evidence": "本体发现与取数可以往返迭代：取数发现的事实可以修正本体。",
-      "source": "file_evidence",
-      "causal_role": null
+      "source": "file_evidence"
     },
     {
       "id": "sch-verify-fail-revise",
@@ -17,8 +16,7 @@
       "predicate": "causes",
       "object": "model_revise_problem_spec",
       "evidence": "结果核对失败后，模型可依据明确反馈修订 ProblemSpec 并重新求解。",
-      "source": "file_evidence",
-      "causal_role": "observed_association"
+      "source": "file_evidence"
     },
     {
       "id": "sch-no-preset-ontology",
@@ -27,8 +25,7 @@
       "predicate": "not_has",
       "object": "preset_full_answer",
       "evidence": "不预置完整客户本体或手写客户排产答案作为模型初始知识。",
-      "source": "file_evidence",
-      "causal_role": null
+      "source": "file_evidence"
     },
     {
       "id": "sch-missing-data-ask",
@@ -37,8 +34,7 @@
       "predicate": "causes",
       "object": "ask_business_confirmation",
       "evidence": "资料没有说明的硬限制、库存状态和目标优先级，向业务确认，不凭常识补成事实。",
-      "source": "file_evidence",
-      "causal_role": "observed_association"
+      "source": "file_evidence"
     },
     {
       "id": "sch-shared-resource-bottleneck",
@@ -47,8 +43,7 @@
       "predicate": "causes",
       "object": "schedule_conflict",
       "evidence": "首个业务案例必须有共享资源竞争、上游供料限制和客户交付要求。",
-      "source": "file_evidence",
-      "causal_role": "observed_association"
+      "source": "file_evidence"
     },
     {
       "id": "sch-array-cell-module",
@@ -57,8 +52,7 @@
       "predicate": "related_to",
       "object": "cell_to_module_flow",
       "evidence": "Array → Cell → 模组三段，少量产品和瓶颈资源组；按日规划。",
-      "source": "file_evidence",
-      "causal_role": null
+      "source": "file_evidence"
     },
     {
       "id": "sch-goal-not-preset",
@@ -67,8 +61,7 @@
       "predicate": "not_has",
       "object": "preset_delivery_cost_weights",
       "evidence": "目标由客户制定；不预设交期、库存或成本的权重。",
-      "source": "file_evidence",
-      "causal_role": null
+      "source": "file_evidence"
     },
     {
       "id": "sch-readonly-data",
@@ -77,8 +70,7 @@
       "predicate": "has",
       "object": "readonly_constraint",
       "evidence": "数据源只读；生成代码沿用现成隔离执行能力，不能写源数据或读取凭据。",
-      "source": "file_evidence",
-      "causal_role": null
+      "source": "file_evidence"
     }
   ],
   "concepts": [

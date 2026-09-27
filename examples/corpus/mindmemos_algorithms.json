@@ -7,8 +7,7 @@
       "predicate": "related_to",
       "object": "entity_neighborhood_scope",
       "evidence": "Dreaming 从 lookback 窗口选未巩固 add 记录，以每条为种子检索同实体 active 记忆，形成实体中心簇；不做全局比对，也不做孤立两两处理。",
-      "source": "file_evidence",
-      "causal_role": "observed_association"
+      "source": "file_evidence"
     },
     {
       "id": "mmos-dream-detect-then-act",
@@ -17,8 +16,7 @@
       "predicate": "causes",
       "object": "conservative_memory_mutation",
       "evidence": "Dreaming 两阶段 detect-then-act：LLM1 识别冲突/重复/互补碎片/低价值/歧义关系；校验主体一致与证据后，LLM2 产出保守 mutation（合并/更新/归档/link）。实体身份或时序不确定时倾向非破坏性更新。",
-      "source": "file_evidence",
-      "causal_role": "observed_association"
+      "source": "file_evidence"
     },
     {
       "id": "mmos-dream-benchmark-gain",
@@ -27,8 +25,7 @@
       "predicate": "causes",
       "object": "factconsolidation_score_gain",
       "evidence": "MemoryAgentBench FactConsolidation：GPT-4o-mini 下 MindVanilla 0.635 → +Dreaming 0.738（AMCR 21.4%）；GPT-5-mini 0.900 → 0.920（AMCR 23.5%）。",
-      "source": "file_evidence",
-      "causal_role": "intervention"
+      "source": "file_evidence"
     },
     {
       "id": "mmos-feedback-persistence-3way",
@@ -37,8 +34,7 @@
       "predicate": "related_to",
       "object": "persistence_scope",
       "evidence": "隐式反馈：异步扫 session，从用户对 agent 输出的纠正中检测信号，按持久性分类 task-temporary / scenario-specific / long-term；仅 durable 范围才规划 add/update/delete。",
-      "source": "file_evidence",
-      "causal_role": "observed_association"
+      "source": "file_evidence"
     },
     {
       "id": "mmos-temp-correction-not-durable",
@@ -47,8 +43,7 @@
       "predicate": "not_related_to",
       "object": "durable_memory_write",
       "evidence": "Task-temporary 纠正只适用于当前任务，不作为新 durable 记忆存储；但可用于纠正错误保留的一次性信息。",
-      "source": "file_evidence",
-      "causal_role": null
+      "source": "file_evidence"
     },
     {
       "id": "mmos-action-plan-5ops",
@@ -57,8 +52,7 @@
       "predicate": "related_to",
       "object": "add_reinforce_update_merge_skip",
       "evidence": "MindVanilla 去重与 Action Planning：content hash + memory type 去重后，确定性安全门将候选映射为 Add / Reinforce / Update / Merge / Skip。",
-      "source": "file_evidence",
-      "causal_role": null
+      "source": "file_evidence"
     },
     {
       "id": "mmos-recall-aware-envelope",
@@ -67,8 +61,7 @@
       "predicate": "related_to",
       "object": "evidence_vs_context_envelope",
       "evidence": "Recall-aware 提取：结构化 envelope 分离 extractable evidence 与 contextual memories；历史/召回仅用于消歧、查重、冲突判断，不得直接支撑新记忆内容。",
-      "source": "file_evidence",
-      "causal_role": null
+      "source": "file_evidence"
     },
     {
       "id": "mmos-compact-rrf-bidirectional",
@@ -77,8 +70,7 @@
       "predicate": "related_to",
       "object": "hybrid_rrf_bidirectional",
       "evidence": "Compact Search：BM25 + dense embedding 经 RRF 融合；图上前向（实体→属性）与反向（属性记录→实体）遍历；agentic 外层迭代规划检索直至证据充分。",
-      "source": "file_evidence",
-      "causal_role": null
+      "source": "file_evidence"
     },
     {
       "id": "mmos-entity-property-time",
@@ -87,8 +79,7 @@
       "predicate": "related_to",
       "object": "entity_property_time",
       "evidence": "三维结构：entity（人/组织/位置/事件/制品）+ property（偏好/活动/经验）+ time；同一 entity-property 的 successive 记录形成 timeline，可表示更新与冲突版本而不覆盖历史。",
-      "source": "file_evidence",
-      "causal_role": null
+      "source": "file_evidence"
     },
     {
       "id": "mmos-skill-evolve-trajectory",
@@ -97,8 +88,7 @@
       "predicate": "causes",
       "object": "skill_version_update",
       "evidence": "MindSkillEvolve：轨迹绑定 skill 版本；未消费轨迹聚合成 evidence-driven 分析；达阈值后 LLM 生成 skill 编辑计划并确定性应用，产出新版本。SpreadsheetBench 成功率：no-skill 51.3% → evolve-unsup 55.3% / evolve-sup 57.2%。",
-      "source": "file_evidence",
-      "causal_role": "intervention"
+      "source": "file_evidence"
     },
     {
       "id": "mmos-openclaw-write-hook",
@@ -107,8 +97,7 @@
       "predicate": "depends_on",
       "object": "allow_conversation_access",
       "evidence": "OpenClaw 插件 agent_end 写入需要 allowConversationAccess；否则看起来正常但回合结束后记忆不落库。CLI PATH 需绝对路径或 uv run 包装。",
-      "source": "file_evidence",
-      "causal_role": "observed_association"
+      "source": "file_evidence"
     },
     {
       "id": "mmos-schmea-evolve-fitness",
@@ -117,8 +106,7 @@
       "predicate": "related_to",
       "object": "llm_guided_schema_evolution",
       "evidence": "MindMemEvolve 用 QA Judge 作 fitness，LLM 引导 induced/random mutation + crossover + 剪枝，在离散 schema 空间做进化搜索。",
-      "source": "file_evidence",
-      "causal_role": null
+      "source": "file_evidence"
     }
   ],
   "concepts": [

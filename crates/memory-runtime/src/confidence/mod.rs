@@ -68,9 +68,32 @@ fn get_weight(evidence_type: &EvidenceType) -> (f64, f64) {
         .unwrap_or((0.0, 0.0))
 }
 
-/// Raw (α, β) deltas for an evidence type. Used by P7 scaled edge updates.
+/// Raw (α, β) deltas for an evidence type.
 pub fn evidence_deltas(evidence_type: &EvidenceType) -> (f64, f64) {
     get_weight(evidence_type)
+}
+
+/// Evidence weight = type × source trust × reuse (cross-project count).
+/// Returns (alpha_delta, beta_delta) to apply to a Beta posterior.
+pub fn heterogeneous_evidence_weight(
+    evidence: &EvidenceType,
+    source: Option<crate::models::observation::ObservationSourceType>,
+    cross_project_count: i64,
+) -> (f64, f64) {
+    use crate::models::observation::ObservationSourceType as Src;
+    let (a, b) = get_weight(evidence);
+    let source_factor = match source {
+        Some(Src::FileEvidence) => 1.25,
+        Some(Src::UserConfirm) => 1.15,
+        Some(Src::UserNegation) => 1.15,
+        Some(Src::UserMessage) => 1.0,
+        Some(Src::AssistantGuess) => 0.5,
+        None => 1.0,
+    };
+    // Reuse: each additional independent workspace beyond the first adds 25%,
+    // capped at 2.0× so a hot triple cannot dominate the graph.
+    let reuse = ((cross_project_count.max(1) - 1) as f64 * 0.25 + 1.0).min(2.0);
+    (a * source_factor * reuse, b * source_factor * reuse)
 }
 
 impl BetaConfidence {
@@ -152,6 +175,23 @@ mod tests {
         bc.update(&EvidenceType::AssistantSpeculation);
         assert_eq!(bc.alpha, 1.0);
         assert_eq!(bc.beta, 1.0);
+    }
+
+    #[test]
+    fn reuse_increases_weight_capped() {
+        let single = heterogeneous_evidence_weight(&EvidenceType::RepeatedOccurrence, None, 1);
+        let multi = heterogeneous_evidence_weight(&EvidenceType::RepeatedOccurrence, None, 5);
+        let huge = heterogeneous_evidence_weight(&EvidenceType::RepeatedOccurrence, None, 100);
+        assert!(multi.0 > single.0);
+        assert!(huge.0 <= single.0 * 2.0 + 1e-9);
+    }
+
+    #[test]
+    fn assistant_guess_downweights() {
+        use crate::models::observation::ObservationSourceType as Src;
+        let file = heterogeneous_evidence_weight(&EvidenceType::FileEvidence, Some(Src::FileEvidence), 1);
+        let guess = heterogeneous_evidence_weight(&EvidenceType::FileEvidence, Some(Src::AssistantGuess), 1);
+        assert!(guess.0 < file.0);
     }
 
     #[test]

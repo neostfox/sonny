@@ -77,7 +77,6 @@ fn causes_obs(ws: &str, mem: &str, subject: &str, object: &str) -> Observation {
         extraction_batch_id: None,
         superseded_by: None,
         cross_project_count: 1,
-        causal_role: Some("intervention".into()),
         consolidated: false,
         created_at: "t".into(),
     }
@@ -110,35 +109,26 @@ fn isomorphic_modules_match_across_workspaces() {
     observations.insert(&causes_obs("ws-b", "raw-b1", "beta_src", "beta_mid")).unwrap();
     observations.insert(&causes_obs("ws-b", "raw-b2", "beta_mid", "beta_sink")).unwrap();
 
-    // Give mod-b a confirmed causal self-loop style edge (self -> causal_peer placeholder)
-    // by recording a causal relation involving mod-b.
+    // Self-loop rejected; a valid peer edge is needed for transfer notes.
     relations
-        .record_causal_evidence(
+        .record_evidence(
             "ws-b",
             "mod-b",
-            "mod-b", // will be rejected as self-loop — use a second concept instead
+            "mod-b",
+            RelationType::SharedEntity,
             &memory_runtime::confidence::EvidenceType::HumanReviewConfirm,
-            Some(ObservationSourceType::FileEvidence),
-            2,
-            &memory_runtime::models::causal::CausalStats {
-                p_do: Some(0.9),
-                p_given: Some(0.8),
-                p_not_given: Some(0.1),
-            },
         )
         .unwrap_err(); // self-loop rejected
 
-    // Add a peer concept in ws-b so the causal edge is valid and transferable.
+    // Add a peer concept in ws-b so the edge is valid and transferable.
     concepts.insert_concept(&concept("ws-b", "mod-b-peer", &["beta_peer"])).unwrap();
     let edge = relations
-        .record_causal_evidence(
+        .record_evidence(
             "ws-b",
             "mod-b",
             "mod-b-peer",
+            RelationType::SharedEntity,
             &memory_runtime::confidence::EvidenceType::HumanReviewConfirm,
-            Some(ObservationSourceType::FileEvidence),
-            2,
-            &memory_runtime::models::causal::CausalStats::default(),
         )
         .unwrap();
     assert_eq!(edge.lifecycle, RelationLifecycle::Confirmed);
@@ -212,13 +202,13 @@ fn unrelated_structure_is_not_a_peer() {
 #[test]
 fn format_notes_lists_validated_edges() {
     use memory_runtime::models::relation::ConceptRelation;
-    let mut edge = ConceptRelation::new("ws-b", "p1", "p2", RelationType::Causal, "t");
+    let mut edge = ConceptRelation::new("ws-b", "p1", "p2", RelationType::SharedEntity, "t");
     edge.lifecycle = RelationLifecycle::Validated;
     let peer = memory_runtime::pipeline::transfer::StructuralPeer {
         concept_id: "p".into(),
         workspace_id: "ws-b".into(),
         similarity: 0.9,
-        transferable_causal_edges: vec![edge],
+        transferable_edges: vec![edge],
     };
     let notes = format_transfer_notes(&[peer], 5);
     assert_eq!(notes.len(), 1);

@@ -36,9 +36,6 @@ pub struct Observation {
     /// P6-B: how many distinct workspaces independently observed this
     /// (subject, predicate, object) triple. Starts at 1 in the origin workspace.
     pub cross_project_count: i64,
-    /// P7-A: optional causal role (`intervention` / `outcome` /
-    /// `observed_association` / `confound`). Free-text stored as canonical snake_case.
-    pub causal_role: Option<String>,
     pub created_at: String,
 }
 
@@ -194,7 +191,6 @@ mod tests {
             extraction_batch_id: None,
             superseded_by: None,
             cross_project_count: 1,
-            causal_role: None,
             created_at: "t".into(),
         }
     }

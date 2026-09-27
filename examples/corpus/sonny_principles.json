@@ -7,8 +7,7 @@
       "predicate": "related_to",
       "object": "knowledge_compound",
       "evidence": "跨项目验证 > 单项目重复：一条在 5 个项目各验证 1 次的知识，比单项目重复 5 次更有价值。",
-      "source": "user_confirm",
-      "causal_role": "observed_association"
+      "source": "user_confirm"
     },
     {
       "id": "sonny-structure-beats-name",
@@ -17,8 +16,7 @@
       "predicate": "related_to",
       "object": "causal_same_class",
       "evidence": "结构 > 名字：两个模块叫不同名字但因果依赖结构相同，在因果意义上是同一类。",
-      "source": "user_confirm",
-      "causal_role": "observed_association"
+      "source": "user_confirm"
     },
     {
       "id": "sonny-hetero-evidence",
@@ -27,8 +25,7 @@
       "predicate": "not_related_to",
       "object": "equal_weights",
       "evidence": "异源证据不应该等权：ctl gate 干预证据远大于 Obsidian 关联暗示。",
-      "source": "user_confirm",
-      "causal_role": null
+      "source": "user_confirm"
     },
     {
       "id": "sonny-client-evidence-provider",
@@ -37,8 +34,7 @@
       "predicate": "related_to",
       "object": "evidence_provider",
       "evidence": "客户端是证据提供者，Sonny 是因果推断引擎；提取/格式化属于客户端适配层。",
-      "source": "user_confirm",
-      "causal_role": null
+      "source": "user_confirm"
     },
     {
       "id": "sonny-dream-entity-neighborhood",
@@ -47,8 +43,7 @@
       "predicate": "related_to",
       "object": "entity_neighborhood_consolidation",
       "evidence": "Dreaming 按实体邻域 detect→act，而非全局比对；标记 consolidated 防重复处理。",
-      "source": "user_confirm",
-      "causal_role": null
+      "source": "user_confirm"
     },
     {
       "id": "sonny-temp-feedback-not-durable",
@@ -57,8 +52,7 @@
       "predicate": "not_related_to",
       "object": "durable_memory_write",
       "evidence": "任务级临时纠正不应写入 durable 记忆；PersistenceScope 三档拦截。",
-      "source": "user_confirm",
-      "causal_role": "observed_association"
+      "source": "user_confirm"
     }
   ],
   "concepts": [

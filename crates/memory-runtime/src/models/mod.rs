@@ -1,4 +1,3 @@
-pub mod causal;
 pub mod concept;
 pub mod embedding;
 pub mod evidence;

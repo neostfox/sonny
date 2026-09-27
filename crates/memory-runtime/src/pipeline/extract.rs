@@ -218,7 +218,6 @@ fn raw_to_observation(
         extraction_batch_id: Some(extraction_batch_id.to_string()),
         superseded_by: None,
         cross_project_count: 1,
-        causal_role: None,
         consolidated: false,
         created_at: chrono::Utc::now().to_rfc3339(),
     }

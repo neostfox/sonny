@@ -4,7 +4,11 @@
 >
 > 你今天在项目 A 踩过的坑、在 Obsidian 里写下的洞察、在 OpenClaw 里积累的经验，
 > 不应该仅仅服务于它们各自的上下文。它们应该形成一个跨项目、跨领域的复利池——
-> 每一次新的经历都在旧知识的基础上产生杠杆。因果贝叶斯推断是实现这个目标的数学工具。
+> 每一次新的经历都在旧知识的基础上产生杠杆。证据台账（Beta 后验）是实现这个目标的数学工具。
+>
+> **P7 因果 do-统计已移除（2026-09）：** 能力探针证明 `causes` 共现会被记成因果边，而生产抽取从不写
+> `causal_role`，所谓 p_do 只是人工标签上的 Laplace 计数，不是 do-calculus。关联与因果诚实分开：
+> `causes` 只生成 `shared_entity` 关联边。
 
 ---
 
@@ -15,7 +19,7 @@
 | P0–P4 | 存储/提取/聚类/召回/反馈闭环 | ✅ |
 | P5-A | `concept_relation` 边 + 边级 Beta 生命周期 | ✅ |
 | P6 | 概念分层 / 跨项目计数 / 推广 / 可见性 / 别名合并 | ✅ |
-| P7 | 因果角色 / do-充分统计量 / 异源证据权重 | ✅ |
+| P7 | ~~因果角色 / do-充分统计量~~ → **已拆除**（保留异源证据权重） | ❌ removed |
 | P8 | WL 结构指纹 / 跨 workspace 迁移 notes | ✅ |
 | P10 | Dreaming 实体邻域离线巩固 | ✅ |
 | P11 | 隐式反馈 + 持久性三档 | ✅ |
@@ -25,7 +29,7 @@
 | CLI | dream / promote / recall-compact / timeline / seed / extract / link / transfer / feedback / consolidate | ✅ |
 | G1 用例 seed | `examples/corpus` — boemenhu / schedule / sonny + **MindMemOS 算法/Skill/基准** | ✅ |
 
-**定位：** 跨项目因果知识引擎。吸收 MindMemOS 的质量闭环（Dreaming / 隐式反馈 / Action Plan / Compact Search / Timeline），不吸收其重型基础设施。
+**定位：** 跨项目知识记忆引擎（证据台账 + 关联图）。吸收 MindMemOS 的质量闭环（Dreaming / 隐式反馈 / Action Plan / Compact Search / Timeline），不吸收其重型基础设施。
 
 ### 关键入口
 
@@ -34,7 +38,7 @@
 | 推广条件 | `models/scope.rs` · `pipeline/promote.rs` |
 | 跨项目计数 | `ObservationStore::sync_cross_project_count` |
 | 可见性 | `list_visible_concepts` · `RecallEngine::with_elevated_visibility` |
-| 因果角色 | `models/causal.rs` · LinkEngine |
+| 关联边（causes→shared_entity） | `pipeline/link.rs` |
 | 结构迁移 | `pipeline/transfer.rs` |
 | Dreaming | `pipeline/dream.rs` |
 | 持久性分类 | `models/persistence.rs` |
@@ -45,7 +49,7 @@
 
 ### 验收测试
 
-- `p6_layering_test` / `p7_causal_fusion_test` / `p8_transfer_test`
+- `p6_layering_test` / `p8_transfer_test`
 - `p10_12_quality_loop_test` / `p13_compact_search_test` / `p14_timeline_test`
 
 ---

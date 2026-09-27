@@ -30,7 +30,6 @@ fn obs(ws: &str, subj: &str, pred: &str, obj: Option<&str>) -> Observation {
         extraction_batch_id: None,
         superseded_by: None,
         cross_project_count: 1,
-        causal_role: None,
         consolidated: false,
         created_at: "t".into(),
     }

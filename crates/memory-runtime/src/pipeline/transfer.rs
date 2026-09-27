@@ -11,7 +11,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::entity::canonical_key_light;
 use crate::error::MemoryResult;
 use crate::models::concept::Concept;
-use crate::models::hierarchy::RelationType;
 use crate::models::observation::Observation;
 use crate::models::relation::ConceptRelation;
 use crate::models::status::ObservationStatus;
@@ -192,7 +191,7 @@ pub struct StructuralPeer {
     pub workspace_id: String,
     pub similarity: f64,
     /// Causal edges on the peer worth transferring.
-    pub transferable_causal_edges: Vec<ConceptRelation>,
+    pub transferable_edges: Vec<ConceptRelation>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -287,9 +286,8 @@ where
             let transferable: Vec<ConceptRelation> = peer_rel
                 .into_iter()
                 .filter(|r| {
-                    r.relation_type == RelationType::Causal
-                        && (r.src_concept_id == candidate.concept_id
-                            || r.dst_concept_id == candidate.concept_id)
+                    (r.src_concept_id == candidate.concept_id
+                        || r.dst_concept_id == candidate.concept_id)
                         && matches!(
                             r.lifecycle,
                             crate::models::relation::RelationLifecycle::Validated
@@ -301,7 +299,7 @@ where
                 concept_id: candidate.concept_id.clone(),
                 workspace_id: candidate.workspace_id.clone(),
                 similarity: sim,
-                transferable_causal_edges: transferable,
+                transferable_edges: transferable,
             });
         }
     }
@@ -315,14 +313,14 @@ where
 pub fn format_transfer_notes(peers: &[StructuralPeer], max_notes: usize) -> Vec<String> {
     let mut notes = Vec::new();
     for peer in peers.iter().take(max_notes) {
-        if peer.transferable_causal_edges.is_empty() {
+        if peer.transferable_edges.is_empty() {
             notes.push(format!(
                 "[{}] 结构相似度 {:.2}，但无已验证因果边可迁移",
                 peer.workspace_id, peer.similarity
             ));
             continue;
         }
-        for edge in peer.transferable_causal_edges.iter().take(3) {
+        for edge in peer.transferable_edges.iter().take(3) {
             notes.push(format!(
                 "[{} · sim {:.2}] 因果边 {} → {}（{:?}，weight {:.2}）",
                 peer.workspace_id,

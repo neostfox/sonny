@@ -30,8 +30,6 @@ pub struct SeedObservation {
     pub workspace: String,
     #[serde(default = "default_source")]
     pub source: String,
-    #[serde(default = "default_role")]
-    pub causal_role: Option<String>,
 }
 
 fn default_ws() -> String {
@@ -39,9 +37,6 @@ fn default_ws() -> String {
 }
 fn default_source() -> String {
     "file_evidence".into()
-}
-fn default_role() -> Option<String> {
-    None
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -163,7 +158,6 @@ pub fn apply_bundle(db: &Database, bundle: &SeedBundle) -> MemoryResult<SeedRepo
             extraction_batch_id: Some(format!("seed-batch-{}", o.workspace)),
             superseded_by: None,
             cross_project_count: 1,
-            causal_role: o.causal_role.clone(),
             consolidated: false,
             created_at: now.clone(),
         };
@@ -229,35 +223,22 @@ pub fn apply_bundle(db: &Database, bundle: &SeedBundle) -> MemoryResult<SeedRepo
 
     for r in &bundle.relations {
         let rt = match r.relation_type.as_str() {
-            "shared_entity" => RelationType::SharedEntity,
+            "shared_entity" | "related_to" | "causal" => RelationType::SharedEntity,
             "shared_session" => RelationType::SharedSession,
             "temporal" => RelationType::Temporal,
             "embedding_similarity" => RelationType::EmbeddingSimilarity,
-            "related_to" => RelationType::SharedEntity,
-            _ => RelationType::Causal,
+            _ => RelationType::SharedEntity,
         };
         match relations.get_edge(&r.workspace, &r.src, &r.dst, rt)? {
             Some(_) => {}
             None => {
-                if rt == RelationType::Causal {
-                    relations.record_causal_evidence(
-                        &r.workspace,
-                        &r.src,
-                        &r.dst,
-                        &crate::confidence::EvidenceType::HumanReviewConfirm,
-                        Some(ObservationSourceType::FileEvidence),
-                        1,
-                        &crate::models::causal::CausalStats::default(),
-                    )?;
-                } else {
-                    relations.record_evidence(
-                        &r.workspace,
-                        &r.src,
-                        &r.dst,
-                        rt,
-                        &crate::confidence::EvidenceType::RepeatedOccurrence,
-                    )?;
-                }
+                relations.record_evidence(
+                    &r.workspace,
+                    &r.src,
+                    &r.dst,
+                    rt,
+                    &crate::confidence::EvidenceType::RepeatedOccurrence,
+                )?;
                 report.relations += 1;
             }
         }

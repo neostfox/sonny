@@ -46,7 +46,6 @@ fn obs(ws: &str, mem: &str, subj: &str, pred: &str, obj: Option<&str>, alpha: f6
         extraction_batch_id: None,
         superseded_by: None,
         cross_project_count: 1,
-        causal_role: None,
         consolidated: false,
         created_at: "2026-07-01T00:00:00Z".into(),
     }

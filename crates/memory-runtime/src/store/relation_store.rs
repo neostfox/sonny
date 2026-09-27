@@ -26,11 +26,11 @@ impl SqliteRelationStore {
 
 const RELATION_COLUMNS: &str = "\
     relation_id, workspace_id, src_concept_id, dst_concept_id, relation_type, lifecycle, \
-    evidence_alpha, evidence_beta, evidence_count, last_evidence_at, p_do, p_given, p_not_given, \
+    evidence_alpha, evidence_beta, evidence_count, last_evidence_at, \
     created_at, updated_at";
 
 static RELATION_INSERT: LazyLock<String> = LazyLock::new(|| {
-    format!("INSERT INTO concept_relation ({RELATION_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)")
+    format!("INSERT INTO concept_relation ({RELATION_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)")
 });
 static RELATION_GET: LazyLock<String> = LazyLock::new(|| {
     format!("SELECT {RELATION_COLUMNS} FROM concept_relation WHERE workspace_id = ?1 AND src_concept_id = ?2 AND dst_concept_id = ?3 AND relation_type = ?4")
@@ -42,8 +42,7 @@ static RELATION_LIST: LazyLock<String> = LazyLock::new(|| {
     format!("SELECT {RELATION_COLUMNS} FROM concept_relation WHERE workspace_id = ?1 ORDER BY created_at, src_concept_id, dst_concept_id")
 });
 const RELATION_UPDATE: &str = "UPDATE concept_relation SET lifecycle = ?5, evidence_alpha = ?6, \
-    evidence_beta = ?7, evidence_count = ?8, last_evidence_at = ?9, \
-    p_do = ?10, p_given = ?11, p_not_given = ?12, updated_at = ?13 \
+    evidence_beta = ?7, evidence_count = ?8, last_evidence_at = ?9, updated_at = ?10 \
     WHERE workspace_id = ?1 AND src_concept_id = ?2 AND dst_concept_id = ?3 AND relation_type = ?4";
 const CONNECTION_COUNT_BUMP: &str =
     "UPDATE concept SET connection_count = connection_count + 1 WHERE concept_id IN (?1, ?2)";
@@ -79,13 +78,8 @@ fn row_to_relation(row: &Row<'_>) -> rusqlite::Result<ConceptRelation> {
         evidence_beta: row.get(7)?,
         evidence_count: row.get(8)?,
         last_evidence_at: row.get(9)?,
-        causal_stats: crate::models::causal::CausalStats {
-            p_do: row.get(10)?,
-            p_given: row.get(11)?,
-            p_not_given: row.get(12)?,
-        },
-        created_at: row.get(13)?,
-        updated_at: row.get(14)?,
+        created_at: row.get(10)?,
+        updated_at: row.get(11)?,
     })
 }
 
@@ -143,9 +137,6 @@ impl RelationStore for SqliteRelationStore {
                         &edge.evidence_beta,
                         &edge.evidence_count,
                         &edge.last_evidence_at,
-                        edge.causal_stats.p_do,
-                        edge.causal_stats.p_given,
-                        edge.causal_stats.p_not_given,
                         &edge.created_at,
                         &edge.updated_at,
                     ],
@@ -168,113 +159,6 @@ impl RelationStore for SqliteRelationStore {
                 &edge.evidence_beta,
                 &edge.evidence_count,
                 &edge.last_evidence_at,
-                edge.causal_stats.p_do,
-                edge.causal_stats.p_given,
-                edge.causal_stats.p_not_given,
-                &edge.updated_at,
-            ],
-        )?;
-        tx.commit()?;
-        Ok(edge)
-    }
-
-    fn record_causal_evidence(
-        &self,
-        workspace_id: &str,
-        src_concept_id: &str,
-        dst_concept_id: &str,
-        evidence: &EvidenceType,
-        source: Option<crate::models::observation::ObservationSourceType>,
-        cross_project_count: i64,
-        stats: &crate::models::causal::CausalStats,
-    ) -> MemoryResult<ConceptRelation> {
-        let (src, dst) = canonical_pair(src_concept_id, dst_concept_id, RelationType::Causal);
-        if src == dst {
-            return Err(MemoryError::SelfLoopRelation {
-                concept_id: src.to_string(),
-            });
-        }
-        let now = Utc::now().to_rfc3339();
-        let conn = self.conn.lock();
-        let tx = conn.unchecked_transaction()?;
-        let existing = tx
-            .query_row(
-                &RELATION_GET,
-                params![workspace_id, src, dst, RelationType::Causal.as_str()],
-                row_to_relation,
-            )
-            .map(Some)
-            .or_else(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => Ok(None),
-                other => Err(other),
-            })?;
-
-        let mut edge = match existing {
-            Some(edge) => edge,
-            None => {
-                let edge = ConceptRelation::new(workspace_id, src, dst, RelationType::Causal, &now);
-                tx.execute(
-                    &RELATION_INSERT,
-                    params![
-                        &edge.relation_id,
-                        &edge.workspace_id,
-                        &edge.src_concept_id,
-                        &edge.dst_concept_id,
-                        edge.relation_type.as_str(),
-                        edge.lifecycle.as_str(),
-                        &edge.evidence_alpha,
-                        &edge.evidence_beta,
-                        &edge.evidence_count,
-                        &edge.last_evidence_at,
-                        edge.causal_stats.p_do,
-                        edge.causal_stats.p_given,
-                        edge.causal_stats.p_not_given,
-                        &edge.created_at,
-                        &edge.updated_at,
-                    ],
-                )?;
-                tx.execute(CONNECTION_COUNT_BUMP, params![src, dst])?;
-                edge
-            }
-        };
-
-        let (a_scale, b_scale) = crate::models::causal::heterogeneous_evidence_weight(
-            evidence,
-            source,
-            cross_project_count,
-        );
-        // Scales are absolute deltas from heterogeneous_evidence_weight; add_evidence_scaled
-        // multiplies the *base* deltas, so convert to multipliers.
-        let (base_a, base_b) = crate::confidence::evidence_deltas(evidence);
-        let am = if base_a > 0.0 { a_scale / base_a } else { 1.0 };
-        let bm = if base_b > 0.0 { b_scale / base_b } else { 1.0 };
-        edge.add_evidence_scaled(evidence, &now, am, bm);
-        if edge.causal_stats.p_do.is_none() && stats.p_do.is_some() {
-            edge.causal_stats.p_do = stats.p_do;
-        } else if stats.p_do.is_some() {
-            edge.causal_stats.p_do = stats.p_do;
-        }
-        if stats.p_given.is_some() {
-            edge.causal_stats.p_given = stats.p_given;
-        }
-        if stats.p_not_given.is_some() {
-            edge.causal_stats.p_not_given = stats.p_not_given;
-        }
-        tx.execute(
-            RELATION_UPDATE,
-            params![
-                &edge.workspace_id,
-                &edge.src_concept_id,
-                &edge.dst_concept_id,
-                edge.relation_type.as_str(),
-                edge.lifecycle.as_str(),
-                &edge.evidence_alpha,
-                &edge.evidence_beta,
-                &edge.evidence_count,
-                &edge.last_evidence_at,
-                edge.causal_stats.p_do,
-                edge.causal_stats.p_given,
-                edge.causal_stats.p_not_given,
                 &edge.updated_at,
             ],
         )?;
@@ -383,13 +267,13 @@ mod tests {
         seed(&concepts, &["c-a", "c-b"]);
 
         let first = relations
-            .record_evidence("ws", "c-a", "c-b", RelationType::Causal, &EvidenceType::FileEvidence)
+            .record_evidence("ws", "c-a", "c-b", RelationType::Temporal, &EvidenceType::FileEvidence)
             .unwrap();
         assert_eq!(first.evidence_count, 1);
         assert!((first.weight() - 2.5 / 3.5).abs() < 1e-9);
 
         let second = relations
-            .record_evidence("ws", "c-a", "c-b", RelationType::Causal, &EvidenceType::FileEvidence)
+            .record_evidence("ws", "c-a", "c-b", RelationType::Temporal, &EvidenceType::FileEvidence)
             .unwrap();
         assert_eq!(second.evidence_count, 2);
         assert_eq!(second.relation_id, first.relation_id);
@@ -418,10 +302,10 @@ mod tests {
         let (_db, relations, concepts) = store();
         seed(&concepts, &["c-a", "c-b"]);
         relations
-            .record_evidence("ws", "c-b", "c-a", RelationType::Causal, &EvidenceType::RepeatedOccurrence)
+            .record_evidence("ws", "c-b", "c-a", RelationType::Temporal, &EvidenceType::RepeatedOccurrence)
             .unwrap();
         relations
-            .record_evidence("ws", "c-a", "c-b", RelationType::Causal, &EvidenceType::RepeatedOccurrence)
+            .record_evidence("ws", "c-a", "c-b", RelationType::Temporal, &EvidenceType::RepeatedOccurrence)
             .unwrap();
         assert_eq!(relations.list_by_workspace("ws").unwrap().len(), 2);
     }
@@ -447,15 +331,15 @@ mod tests {
         let (_db, relations, concepts) = store();
         seed(&concepts, &["c-x", "c-hub", "c-y", "c-other", "c-unrelated"]);
         relations
-            .record_evidence("ws", "c-x", "c-hub", RelationType::Causal, &EvidenceType::RepeatedOccurrence)
+            .record_evidence("ws", "c-x", "c-hub", RelationType::Temporal, &EvidenceType::RepeatedOccurrence)
             .unwrap();
         for _ in 0..3 {
             relations
-                .record_evidence("ws", "c-hub", "c-y", RelationType::Causal, &EvidenceType::UserConfirmation)
+                .record_evidence("ws", "c-hub", "c-y", RelationType::Temporal, &EvidenceType::UserConfirmation)
                 .unwrap();
         }
         relations
-            .record_evidence("ws", "c-other", "c-unrelated", RelationType::Causal, &EvidenceType::RepeatedOccurrence)
+            .record_evidence("ws", "c-other", "c-unrelated", RelationType::Temporal, &EvidenceType::RepeatedOccurrence)
             .unwrap();
 
         let hub_edges = relations.neighbors("ws", "c-hub").unwrap();
@@ -492,7 +376,7 @@ mod tests {
             "ws",
             "c-a",
             "c-ghost",
-            RelationType::Causal,
+            RelationType::Temporal,
             &EvidenceType::FileEvidence,
         );
         assert!(err.is_err(), "edge to a ghost concept must fail the FK");
@@ -510,7 +394,7 @@ mod tests {
             "ws",
             "c-a",
             "c-a",
-            RelationType::Causal,
+            RelationType::Temporal,
             &EvidenceType::FileEvidence,
         );
         assert!(matches!(err, Err(MemoryError::SelfLoopRelation { .. })));
@@ -524,11 +408,11 @@ mod tests {
         let (_db, relations, concepts) = store();
         seed(&concepts, &["c-a", "c-b"]);
         relations
-            .record_evidence("ws-1", "c-a", "c-b", RelationType::Causal, &EvidenceType::RepeatedOccurrence)
+            .record_evidence("ws-1", "c-a", "c-b", RelationType::Temporal, &EvidenceType::RepeatedOccurrence)
             .unwrap();
         assert!(relations.list_by_workspace("ws-2").unwrap().is_empty());
         assert!(relations
-            .get_edge("ws-2", "c-a", "c-b", RelationType::Causal)
+            .get_edge("ws-2", "c-a", "c-b", RelationType::Temporal)
             .unwrap()
             .is_none());
     }

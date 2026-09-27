@@ -7,8 +7,7 @@
       "predicate": "depends_on",
       "object": "openpyxl",
       "evidence": "Use openpyxl to read and write .xlsx files. wb = load_workbook('input.xlsx'); ws = wb['Sheet1']; wb.save().",
-      "source": "file_evidence",
-      "causal_role": null
+      "source": "file_evidence"
     },
     {
       "id": "xlsx-cell-1-based",
@@ -17,8 +16,7 @@
       "predicate": "related_to",
       "object": "one_based_coordinates",
       "evidence": "Cell indices are 1-based: ws.cell(row=1, column=1) is A1.",
-      "source": "file_evidence",
-      "causal_role": null
+      "source": "file_evidence"
     },
     {
       "id": "xlsx-data-only-destroys-formulas",
@@ -27,8 +25,7 @@
       "predicate": "causes",
       "object": "formula_loss_on_save",
       "evidence": "data_only=True destroys formulas on save: use a separate workbook object for reading calculated values. Never assume wb.save() computes formulas.",
-      "source": "file_evidence",
-      "causal_role": "intervention"
+      "source": "file_evidence"
     },
     {
       "id": "xlsx-max-row-overcount",
@@ -37,8 +34,7 @@
       "predicate": "related_to",
       "object": "empty_formatted_rows",
       "evidence": "ws.max_row overcounts: may include formatted-but-empty rows. Scan upward to find the last non-empty relevant cell.",
-      "source": "file_evidence",
-      "causal_role": null
+      "source": "file_evidence"
     },
     {
       "id": "xlsx-evolve-not-replace-formula",
@@ -47,8 +43,7 @@
       "predicate": "not_related_to",
       "object": "silent_hardcode_values",
       "evidence": "If the user explicitly asks for a reusable formula, do not silently replace it with hardcoded values. Decide whether grader checks formula text or cached cell values.",
-      "source": "file_evidence",
-      "causal_role": "observed_association"
+      "source": "file_evidence"
     },
     {
       "id": "xlsx-evolve-read-only-inspect",
@@ -57,8 +52,7 @@
       "predicate": "depends_on",
       "object": "read_only_inspection_pass",
       "evidence": "For filtering/lookup/mapping/dedup/sort tasks: first read-only inspection pass to confirm true data bounds, header row, merged cells, and ≥2 concrete source-to-target examples. Then compute in memory and write once.",
-      "source": "file_evidence",
-      "causal_role": "observed_association"
+      "source": "file_evidence"
     },
     {
       "id": "xlsx-evolve-blacklist-live-iter",
@@ -67,8 +61,7 @@
       "predicate": "causes",
       "object": "incorrect_row_transform",
       "evidence": "Blacklisted: iterating a live worksheet while simultaneously reading and writing for filtering, lookup, dedup, sort, row moves, deletion/insertion, or expansion.",
-      "source": "file_evidence",
-      "causal_role": "observed_association"
+      "source": "file_evidence"
     },
     {
       "id": "xlsx-evolve-merged-cells",
@@ -77,8 +70,7 @@
       "predicate": "depends_on",
       "object": "inspect_merged_cells",
       "evidence": "Before writing, inspect ws.merged_cells.ranges. Never assign to a merged placeholder cell (MergedCell).",
-      "source": "file_evidence",
-      "causal_role": null
+      "source": "file_evidence"
     },
     {
       "id": "xlsx-evolve-formula-string-replace",
@@ -87,8 +79,7 @@
       "predicate": "not_related_to",
       "object": "naive_string_replacement",
       "evidence": "Do not generate or extend formulas by naive string replacement on existing formula text; build each target formula explicitly from the row number.",
-      "source": "file_evidence",
-      "causal_role": "observed_association"
+      "source": "file_evidence"
     },
     {
       "id": "xlsx-evolve-benchmark",
@@ -97,8 +88,7 @@
       "predicate": "causes",
       "object": "spreadsheetbench_success_gain",
       "evidence": "SpreadsheetBench-Verified: no-skill 51.3% vs init-skill 48.0% vs MindEvolve-Unsup 55.3% vs MindEvolve-Sup 57.2%. Evolved skill adds high-risk guards, blacklists, grader-aware formula policy.",
-      "source": "file_evidence",
-      "causal_role": "intervention"
+      "source": "file_evidence"
     }
   ],
   "concepts": [

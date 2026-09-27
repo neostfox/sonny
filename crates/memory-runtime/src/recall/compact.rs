@@ -468,7 +468,7 @@ pub fn now_rfc3339() -> String {
 pub fn is_strong_edge(relation_type: RelationType) -> bool {
     matches!(
         relation_type,
-        RelationType::Causal | RelationType::SharedEntity | RelationType::SharedSession
+        RelationType::SharedEntity | RelationType::SharedSession | RelationType::Temporal
     )
 }
 

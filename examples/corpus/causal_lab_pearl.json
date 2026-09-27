@@ -1,0 +1,182 @@
+{
+  "observations": [
+    {
+      "id": "fact-ladder-association",
+      "workspace": "causal-lab",
+      "subject": "pearl_ladder_association",
+      "predicate": "related_to",
+      "object": "seeing_observing",
+      "evidence": "Association is the lowest rung of Pearl's ladder of causation: sensing regularities or patterns expressed as correlations. P(floss|toothpaste) is association only.",
+      "source": "file_evidence"
+    },
+    {
+      "id": "fact-ladder-intervention",
+      "workspace": "causal-lab",
+      "subject": "pearl_ladder_intervention",
+      "predicate": "related_to",
+      "object": "doing_experiment",
+      "evidence": "Intervention is the middle rung: predict effects of deliberate actions. Mathematically P(floss|do(toothpaste)). Causality cannot be established by examining observational history alone.",
+      "source": "file_evidence"
+    },
+    {
+      "id": "fact-ladder-counterfactual",
+      "workspace": "causal-lab",
+      "subject": "pearl_ladder_counterfactual",
+      "predicate": "related_to",
+      "object": "imagining_alternate_world",
+      "evidence": "Counterfactuals are the highest rung: what would have happened under different circumstances for the same unit.",
+      "source": "file_evidence"
+    },
+    {
+      "id": "fact-do-not-observation",
+      "workspace": "causal-lab",
+      "subject": "do_operator",
+      "predicate": "causes",
+      "object": "interventional_distribution",
+      "evidence": "The do-operator signals experimental intervention, a mini-surgery on the model. P(Y|do(X)) is interventional, not observational P(Y|X).",
+      "source": "file_evidence"
+    },
+    {
+      "id": "fact-assoc-not-cause",
+      "workspace": "causal-lab",
+      "subject": "observational_association",
+      "predicate": "not_related_to",
+      "object": "interventional_causation",
+      "evidence": "Associations have no causal implications. One event could cause the other, the reverse could be true, or both could be caused by a third event.",
+      "source": "file_evidence"
+    },
+    {
+      "id": "fact-toothpaste-floss-assoc",
+      "workspace": "causal-lab",
+      "subject": "toothpaste_purchase",
+      "predicate": "related_to",
+      "object": "floss_purchase",
+      "evidence": "Shoppers who buy toothpaste are more likely to also buy dental floss. P(floss|toothpaste) is association only — no causal implication.",
+      "source": "file_evidence"
+    },
+    {
+      "id": "fact-icecream-drowning-confound",
+      "workspace": "causal-lab",
+      "subject": "ice_cream_sales",
+      "predicate": "causes",
+      "object": "drowning_rate",
+      "evidence": "Ice cream sales and drowning rates co-occur in summer. This is a classic confounded association — summer heat is the common cause, not ice cream.",
+      "source": "file_evidence"
+    },
+    {
+      "id": "fact-summer-confound",
+      "workspace": "causal-lab",
+      "subject": "summer_heat",
+      "predicate": "causes",
+      "object": "ice_cream_sales",
+      "evidence": "Summer heat causes both more ice cream sales and more swimming (hence drowning). Temperature is the confounder Z for ice cream and drowning.",
+      "source": "file_evidence"
+    },
+    {
+      "id": "fact-summer-drowning",
+      "workspace": "causal-lab",
+      "subject": "summer_heat",
+      "predicate": "causes",
+      "object": "drowning_rate",
+      "evidence": "Hot weather increases swimming activity and drowning risk independently of ice cream sales.",
+      "source": "file_evidence"
+    },
+    {
+      "id": "fact-backdoor",
+      "workspace": "causal-lab",
+      "subject": "backdoor_adjustment",
+      "predicate": "related_to",
+      "object": "confounder_blocking",
+      "evidence": "Backdoor adjustment conditions on confounders to deconfound observational data. Without it, regression coefficients are not causal effects.",
+      "source": "file_evidence"
+    },
+    {
+      "id": "fact-correlation-not-causation",
+      "workspace": "causal-lab",
+      "subject": "correlation",
+      "predicate": "not_related_to",
+      "object": "causation",
+      "evidence": "Correlation does not imply causation. P(Y|X) > P(Y) is inadequate because a common cause can satisfy the condition.",
+      "source": "file_evidence"
+    },
+    {
+      "id": "fact-do-calculus",
+      "workspace": "causal-lab",
+      "subject": "do_calculus",
+      "predicate": "related_to",
+      "object": "causal_identification",
+      "evidence": "Pearl's do-calculus has three rules for identifying causal effects from observational data and a causal graph. It is not Bayesian network inference on associations alone.",
+      "source": "file_evidence"
+    },
+    {
+      "id": "fact-bayes-vs-causal",
+      "workspace": "causal-lab",
+      "subject": "bayesian_network",
+      "predicate": "not_related_to",
+      "object": "causal_inference_from_association",
+      "evidence": "Bayesian networks encode conditional independencies. Causal models add do-interventions and counterfactuals. LLM next-token prediction is closer to association than to do-calculus.",
+      "source": "file_evidence"
+    },
+    {
+      "id": "fact-p-do-only-from-intervention",
+      "workspace": "causal-lab",
+      "subject": "intervention_evidence",
+      "predicate": "causes",
+      "object": "p_do_update",
+      "evidence": "Only Intervention evidence should move P(effect|do(cause)). Association evidence may update P(effect|cause) but not the interventional quantity.",
+      "source": "file_evidence"
+    }
+  ],
+  "concepts": [
+    {
+      "id": "c-pearl-ladder",
+      "workspace": "causal-lab",
+      "name": "Pearl 因果之梯",
+      "definition": "Association / Intervention / Counterfactual 三级：观察相关、干预实验、反事实想象。do 算子是第二级核心。",
+      "entities": ["pearl_ladder", "association", "intervention", "counterfactual", "do_operator"],
+      "lifecycle_scope": "global",
+      "scope_key": null,
+      "confidence": 0.93
+    },
+    {
+      "id": "c-confounding",
+      "workspace": "causal-lab",
+      "name": "混杂与伪相关",
+      "definition": "Ice cream/drowning 共变由 summer heat 混杂。backdoor adjustment 可去混杂。关联不蕴含因果。",
+      "entities": ["ice_cream_sales", "drowning_rate", "summer_heat", "backdoor_adjustment", "confound"],
+      "lifecycle_scope": "global",
+      "scope_key": null,
+      "confidence": 0.91
+    },
+    {
+      "id": "c-do-vs-association",
+      "workspace": "causal-lab",
+      "name": "do 与观察分布",
+      "definition": "P(Y|do(X)) 是干预分布；P(Y|X) 是观察条件分布。LLM 语言建模更接近后者。",
+      "entities": ["do_operator", "interventional_distribution", "observational_association", "bayesian_network"],
+      "lifecycle_scope": "global",
+      "scope_key": null,
+      "confidence": 0.9
+    }
+  ],
+  "relations": [
+    {
+      "workspace": "causal-lab",
+      "src": "c-pearl-ladder",
+      "dst": "c-do-vs-association",
+      "relation_type": "causal"
+    },
+    {
+      "workspace": "causal-lab",
+      "src": "c-confounding",
+      "dst": "c-do-vs-association",
+      "relation_type": "shared_entity"
+    },
+    {
+      "workspace": "causal-lab",
+      "src": "c-pearl-ladder",
+      "dst": "c-confounding",
+      "relation_type": "shared_entity"
+    }
+  ]
+}

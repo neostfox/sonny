@@ -1,7 +1,6 @@
 //! P13 acceptance: hybrid RRF seed + forward edge + reverse entity expansion.
 
 use memory_runtime::models::concept::Concept;
-use memory_runtime::models::hierarchy::RelationType;
 use memory_runtime::models::scope::LifecycleScope;
 use memory_runtime::models::status::ConceptStatus;
 use memory_runtime::recall::compact::{compact_search, rrf_fuse};
@@ -79,14 +78,12 @@ async fn compact_search_expands_forward_via_causal_edge() {
         .unwrap();
 
     relations
-        .record_causal_evidence(
+        .record_evidence(
             "ws",
             "c-seed",
             "c-neighbor",
+            memory_runtime::models::hierarchy::RelationType::SharedEntity,
             &memory_runtime::confidence::EvidenceType::HumanReviewConfirm,
-            Some(memory_runtime::models::observation::ObservationSourceType::FileEvidence),
-            1,
-            &memory_runtime::models::causal::CausalStats::default(),
         )
         .unwrap();
 

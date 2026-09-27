@@ -134,7 +134,6 @@ fn test_full_pipeline_json_ingest_to_store() {
         source_type: ObservationSourceType::UserMessage,
         consolidated: false,
         cross_project_count: 1,
-        causal_role: None,
         created_at: chrono::Utc::now().to_rfc3339(),
     };
     obs_store.insert(&obs).unwrap();
@@ -299,7 +298,6 @@ fn make_obs(
         extraction_batch_id: None,
         superseded_by: None,
         cross_project_count: 1,
-        causal_role: None,
         consolidated: false,
         created_at: created_at.to_string(),
     }
@@ -503,7 +501,6 @@ fn test_batch_insert_and_query() {
             source_type: ObservationSourceType::UserMessage,
             consolidated: false,
             cross_project_count: 1,
-            causal_role: None,
             created_at: chrono::Utc::now().to_rfc3339(),
         })
         .collect();
@@ -575,7 +572,6 @@ fn test_multiple_stores_share_connection() {
         source_type: ObservationSourceType::UserMessage,
         consolidated: false,
         cross_project_count: 1,
-        causal_role: None,
         created_at: chrono::Utc::now().to_rfc3339(),
     };
     obs_store.insert(&obs).unwrap();
@@ -634,7 +630,6 @@ fn test_coclaim_links_same_batch_observations() {
         superseded_by: None,
         consolidated: false,
         cross_project_count: 1,
-        causal_role: None,
         created_at: chrono::Utc::now().to_rfc3339(),
     };
 
@@ -788,7 +783,6 @@ fn test_find_coclaim_excludes_dead_statuses() {
         superseded_by: None,
         consolidated: false,
         cross_project_count: 1,
-        causal_role: None,
         created_at: chrono::Utc::now().to_rfc3339(),
     };
     obs_store.insert_batch(&[mk(0), mk(1)]).unwrap();
@@ -889,7 +883,6 @@ async fn test_p4b_feedback_closes_recall_loop() {
         extraction_batch_id: None,
         superseded_by: None,
         cross_project_count: 1,
-        causal_role: None,
         created_at: chrono::Utc::now().to_rfc3339(),
     };
     obs_store.insert(&obs).unwrap();
